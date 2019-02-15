@@ -1,0 +1,35 @@
+{
+  "wasp-33": {
+    "orbitalParamters": {
+          "Kp": 239000,
+          "P": 1.21986967,
+          "e": 0,
+          "t0": 2454590.17936,
+          "v_sys": -1500,
+          "w_deg": 90
+    },
+    "starName": "wasp 33",
+    "templates": {
+      "directory": "/dash/exobox/code/python/nmehrle/templates/",
+      "default": "wasp33.pickle"
+    },
+    "instruments": {
+      "aries": {
+        "observatory": "MMT",
+        "dataFormat": "order",
+        "dataPaths": {
+          "dateDirectoryPrefix": "/dash/exobox/proj/pcsa/data/ARIES/proc/",
+          "dateDirectorySuffix": "",
+          "orderFilePrefix": "order_",
+          "orderFileSuffix": ".pickle",
+          "headerFile": "allHeaders.pickle"
+        },
+        "dates": {
+          "2016oct15b": {},
+          "2016oct19": {},
+          "2016oct20b": {}
+        }
+      }
+    }
+  }
+}
