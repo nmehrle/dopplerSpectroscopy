@@ -1,6 +1,8 @@
 import numpy as np
 import json
 
+from utility import *
+
 class hrsObs:
   '''
     An observation object
@@ -11,7 +13,8 @@ class hrsObs:
   '''
   def __init__(self, dbPath, 
                 planet=None, instrument=None, date=None, order=None,
-                template=None):
+                template='default'
+  ):
     '''
       Initialize an observation.
 
@@ -32,11 +35,18 @@ class hrsObs:
     self._date = date
     self._order = order
 
-    self.template = template
-
     self.updateDatabase(initialize=True)
+    if template is 'default':
+      try:
+        self.template = template
+      except:
+        self.template = None
+    else:
+      self.template = template
 
   #-- Top Level Properties
+  #     Planet -> Instrument -> Date -> Order
+  #     ReSetting the top level clears all lower levels, reloads database
   @property
   def planet(self):
     return self._planet
@@ -54,8 +64,7 @@ class hrsObs:
 
   @planet.deleter
   def planet(self):
-    self._planet = None
-    self.updateDatabase(initialize=True)
+    self.planet = None
   
   @property
   def instrument(self):
@@ -73,8 +82,7 @@ class hrsObs:
 
   @instrument.deleter
   def instrument(self):
-    self._instrument = None
-    self.updateDatabase(initialize=True)
+    self.instrument = None
 
   @property
   def date(self):
@@ -88,8 +96,7 @@ class hrsObs:
 
   @date.deleter
   def date(self):
-    self._date = None
-    self.updateDatabase(initialize=True)
+    self.date = None
   
   @property
   def order(self):
@@ -102,13 +109,53 @@ class hrsObs:
 
   @order.deleter
   def order(self,value):
-    self._order = None
-    self.updateDatabase(initialize=True)
+    self.order = None
   ###
 
+  #-- Other Properties
+  @property
+  def template(self):
+    return self._template
+  
+  @template.setter
+  def template(self, value):
+    if value is None:
+      del self.template
+      return
+      
+
+    try:
+      templateFile = self.templateFiles['directory'] + self.templateFiles[value]
+    except AttributeError:
+      if self.planet is None:
+        raise AttributeError('Must specify planet before template.')
+      else:
+        raise AttributeError('templateFiles not found for planet "'+str(self.planet)+'". Please check validity of database.')
+    except KeyError:
+      raise KeyError('Template "'+str(value)+'" not defined for planet "'+str(self.planet)+'".')
+
+    try:
+      self.templateData = readFile(templateFile)
+    except ValueError:
+      raise ValueError('Problem with database entry: template "'+str(value)+'", file "'+str(templateFile)+'" not supported.')
+    except FileNotFoundError:
+      raise FileNotFoundError('Template File "'+str(templateFile)+'" not found.')
+
+    self._template = value
+
+  @template.deleter
+  def template(self):
+    self._template = None
+    try:
+      del self.templateData
+    except AttributeError:
+      pass
+  ###
+
+  #-- Initializing 
   def initializeDatabase(self):
     '''
-      Loads in values from database.
+      Loads in values from database. Data loaded in is used to specify allowed values of attributes, and describes where to find actual data/ how to analyze it.
     '''
 
     # Check database type and existence
@@ -129,7 +176,7 @@ class hrsObs:
     '''
       Descend into databse to the level specified by object attributes If (attr) is specified, (new attr) is set as per:
 
-      planet -> orbParams, starName, templates
+      planet -> orbParams, starName, templates, templateFiles
       instrument -> observatory, dataFormat, dataPaths
       date -> defaultKWs
       order -> analysisKWs
@@ -150,6 +197,7 @@ class hrsObs:
 
     self.planets = list(database.keys())
 
+    # Determine planet level parameters
     if self.planet is not None:
       try:
         database = database[self.planet]
@@ -167,9 +215,12 @@ class hrsObs:
 
       del self.planets
       
-
+    # Set Instrument level parameters
     if self.instrument is not None:
-      database = database['instruments'][self.instrument]
+      try:
+        database = database['instruments'][self.instrument]
+      except KeyError:
+        raise KeyError('Instrument '+str(self.instrument)+' not found for planet "'+str(self.planet)+'".')
       self.database = database
 
       self.observatory = database['observatory']
@@ -179,14 +230,111 @@ class hrsObs:
 
       del self.instruments
 
+    # Set Date level parameters
     if self.date is not None:
-      database = database['dates'][self.date]
+      try:
+        database = database['dates'][self.date]
+      except KeyError:
+        raise KeyError('Date '+str(self.date)+' not found for planet "'+str(self.planet)+'", instrument "'+str(self.instrument)+'".')
       self.database = database
 
       del self.dates
 
+  def isValid(self, warn=True, fatal=False):
+    '''
+      Checks if this observation object is "valid"
+      Valid means the dataset is fully specified -> 
+      planet, instrument, date, order, template all determined
 
+      if warn is true, prints highest level attribute which still needs to be specified
+  
+      Parameters:
+        warn (bool) : If True, prints which needs to be specified 
+        fatal (bool): raises error if not valid
 
+      Returns:
+        valid (bool): indicates if this dataset is valid
+    '''
+    attrList = [self.planet, self.instrument, self.date, self.order, self.template]
+    attrNameList = ['planet','instrument','date','order','template']
 
+    if warn or fatal:
+      for i,attr in enumerate(attrList):
+        if attr is None:
+          if fatal:
+            raise ValueError('Attribute "'+attrNameList[i]+'" is invalid.')
+          else:
+            print('Warning, attribute '+attrNameList[i]+' is invalid.')
+          return False
+      return True
+    else:
+      return not np.any([attr is None for attr in attrList])
 
+  def collectRawData(self, verbose=True):
+    '''
+      Used to collect the raw data from disk for this observation
+      Sets it as object Attributes
+
+      Requires:
+        isValid()
+        self.dataFormat -> updateDataBase()
+        self.dataPaths  -> updateDatabase()
+
+      Creates:
+        self.rawFlux
+        self.errors
+        self.wavelengths
+        self.times
+        self.barycentricCorrection
+    '''
+
+    # check validity of observation 
+    self.isValid(fatal=True)
+
+    # check validity of dataFormat
+    if self.dataFormat == 'order': 
+      
+      dataDir    = self.dataPaths['dateDirectoryPrefix']+self.date+self.dataPaths['dateDirectorySuffix']
+      dataFile   = dataDir + self.dataPaths['orderFilePrefix']+str(self.order)+self.dataPaths['orderFileSuffix']
+      headerFile = dataDir+self.dataPaths['headerFile']
+
+      rawData = readFile(dataFile)
+      headers = readFile(headerFile)
+
+      self.rawFlux = rawData['fluxes']
+      self.errors  = rawData['errors']
+      self.wavelengths = rawData['waves']
+
+      self.times = np.array(headers['JD'])
+
+      # Try to load Barycentric Correction, write it if not found:
+      barycentryVelocityFile = dataDir+'barycentricVelocity.pickle'
+      try:
+        self.barycentricCorrection = readFile(barycentryVelocityFile)
+      except FileNotFoundError:
+        # Barycentric Correction not on disk
+
+        # Calculate it
+        self.barycentricCorrection = getBarycentricCorrection(self.times, self.starName, self.observatory,verbose=verbose)
+
+        # Write to disk
+        with open(barycentryVelocityFile,'wb') as f:
+          pickle.dump(self.barycentricCorrection,f)
+
+    else:
+      raise ValueError('Currently only dataFormat "order" is accepted')
+  ###
+
+  #-- Processing Data
+    '''
+      These functions are for processing the raw data.
+      All require raw data having been collected as per collectRawData()
+    '''
+
+    def trimData():
+      '''
+
+      '''
+      return 1
+  ###
 

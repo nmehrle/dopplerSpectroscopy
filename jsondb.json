@@ -19,7 +19,7 @@
         "dataFormat": "order",
         "dataPaths": {
           "dateDirectoryPrefix": "/dash/exobox/proj/pcsa/data/ARIES/proc/",
-          "dateDirectorySuffix": "",
+          "dateDirectorySuffix": "/",
           "orderFilePrefix": "order_",
           "orderFileSuffix": ".pickle",
           "headerFile": "allHeaders.pickle"
