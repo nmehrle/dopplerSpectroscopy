@@ -25,9 +25,18 @@
           "headerFile": "allHeaders.pickle"
         },
         "dates": {
-          "2016oct15b": {},
-          "2016oct19": {},
-          "2016oct20b": {}
+          "2016oct15b": {
+            "dateLevelKeywords": {},
+            "orders": {}
+          },
+          "2016oct19": {
+            "dateLevelKeywords": {},
+            "orders": {}
+          },
+          "2016oct20b": {
+            "dateLevelKeywords": {},
+            "orders": {}
+          }
         }
       }
     }

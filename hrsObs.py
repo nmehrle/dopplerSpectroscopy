@@ -1,6 +1,7 @@
 import json
 
 from utility import *
+import highResUtils as hru
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -243,6 +244,11 @@ class hrsObs:
         raise KeyError('Date '+str(self.date)+' not found for planet "'+str(self.planet)+'", instrument "'+str(self.instrument)+'".')
       self.database = database
 
+      try:
+        self.dateLevelKeywords = database['dateLevelKeywords']
+      except KeyError:
+        pass
+
       del self.dates
 
   def isValid(self, warn=True, fatal=False):
@@ -328,6 +334,10 @@ class hrsObs:
 
     else:
       raise ValueError('Currently only dataFormat "order" is accepted')
+
+    #set current data and keep track of order of operations
+    self.data = self.rawFlux.copy()
+    self.dataStage = ['Raw Data']
   ###
 
   #-- Processing Data
@@ -336,188 +346,71 @@ class hrsObs:
     All require raw data having been collected as per collectRawData()
   '''
 
-  def trimData():
+  def trimData(self, doAutoTrimCols = False, showPlots=False, **kwargs):
     '''
-
-    '''
-    return 1
-
-  def findEdgeCuts_xcor(flux, neighborhood_size=30, plotResult=False):
-    '''
-      Detects 'edges' in flux as regions where time-wise SNR dramatically drops off from the center. 
-
-      Find edges by cross correlating snr with a step function and getting first minima/last maxima. 
+      Runs highResUtils.trimData() on this observation. 
+      Trims datasets according to rowCuts,colCuts and autoColTrimming
 
       Parameters:
-        flux (array): 2d array of flux as (time, wavelength)
+        doAutoTrimCols (bool): Whether or not to automatically trim columns
 
-        neighborhood_size (int): the region around each point to smooth snr/search for extrema
+        showPlots (bool): shows trimming plots
 
-        plotResult (bool): if True, plot the cuts to visualize
+        **kwargs:
+          entries should be:
+            rowCuts (list of integers): Indicies of rows to remove from the data
 
-      Returns:
-        left_bound, right_bound (int) - the indexes of the found 'edges'
-    '''
-    # Calculate column (time)-wise SNR in flux
-    col_snr = np.nan_to_num(np.apply_along_axis(snr,0,flux))
-    col_snr = col_snr - np.mean(col_snr)
+            colCuts (list of integers): Indicies of columns to remove
 
-    # Apply minimum filter
-    smooth = ndi.minimum_filter(col_snr, neighborhood_size)
-
-    # Create step function and cross-correlate with data
-    n = int(len(smooth)/2)
-    step = np.concatenate((np.ones(n),-1*np.ones(n)))
-    xcor = np.correlate(smooth-np.mean(smooth), step, 'same')
-
-    # return first minima - step up in col_snr in begining
-    # return last  maxima - step down in col_snr at end
-    xcorMinima = getLocalMinima(xcor, neighborhood_size)
-    xcorMaxima = getLocalMaxima(xcor, neighborhood_size)
-    left_bound  = xcorMinima[0]
-    right_bound = xcorMaxima[-1]
-
-    if plotResult:
-      # Plot snr, xcor, and cuts
-      plt.figure()
-      norm_snr = normalize(col_snr)
-      norm_smooth = normalize(smooth)
-
-      plt.plot(norm_snr-np.median(norm_snr),label='Column SNR')
-      plt.plot(norm_smooth - np.median(norm_smooth),label='Minimum Filter')
-      plt.plot(normalize(xcor, (-0.5,0)),label='Cross Correlation')
-      plt.plot(normalize(np.median(flux,0),(-1,-0.5)), label='Median Flux')
-      plt.plot((left_bound,left_bound),(-1.0,0), color='C2')
-      plt.plot((right_bound,right_bound),(-1.0,0), color='C2')
-      plt.legend()
-
-      plt.set_title('Edge Trimming\nLeft: '+str(left_bound)+', Right: '+str(right_bound))
-      plt.set_xlabel('Column Number')
-      plt.set_ylabel('Normalized SNR')
-      plt.show()
-
-    return left_bound, right_bound
-
-  def findEdgeCuts_gradient(flux, gaussian_blur = 10, neighborhood_size = 30,
-                            plotResult=False
-  ):
-    '''
-      Detects 'edges' as regions where second derivitive is minimized just inside where the derivitive is minimized (right) or maximized (left). 
-
-      Parameters:
-        flux (array): 2d array of flux as (time, wavelength) 
-
-        gaussian_blur (int) : the sigma to use when applying a gaussian filter to the data
-
-        neighborhood_size (int): the region around each point to smooth snr/search for extrema
-
-        plotResult (bool): if True, plot the cuts to visualize
-
-      Returns:
-        leftCorner, rightCorner (int) - the indexes of the found 'edges'
+            colTrimFunc (function): function to use to autoTrim cols. Requires doAutoTrimCols=True.
+                                Options (extra parameters):
+                                  hru.findEdgeCuts_xcor (neighborhood_size)
+                                  hru.findEdgeCuts_gradient (gaussian_blur, neighborhood_size)
+                                  hru.findEdgeCuts_numeric (edge, rightEdge, relative)
     '''
 
-    # Smooth and get gradeint of median spectrum
-    signal = np.median(flux,0)
-    smooth = ndi.gaussian_filter(signal, gaussian_blur)
-    grad = np.gradient(smooth)
+    # Set hard row and col cuts
+    # keyword has priority over database
+    try:
+      rowCuts = kwargs.pop('rowCuts')
+    except KeyError:
+      try:
+        rowCuts = self.dateLevelKeywords['rowCuts']
+      except KeyError:
+        rowCuts = None
 
-    # Find minima on left, maxima on right -> indicate where data drops off the fastest 
-    # This is the middle point of the edge
-    maxima = getLocalMaxima(grad,neighborhood_size)
-    minima = getLocalMinima(grad, neighborhood_size)
+    try:
+      colCuts = kwargs.pop('colCuts')
+    except KeyError:
+      try:
+        colCuts = self.dateLevelKeywords['colCuts']
+      except KeyError:
+        colCuts = None
 
-    # remove points that are both minima and maxima
-    minima_store = minima
-    minima = np.setdiff1d(minima,maxima)
-    maxima = np.setdiff1d(maxima,minima_store)
+    # run highResUtils.trimData()
+    applyRowCuts  = [self.times, self.barycentricCorrection]
+    applyColCuts  = [self.wavelengths]
+    applyBothCuts = [self.errors]
 
-    # remove points where minima/maxima = 0
-    minima = minima[np.logical_not(np.isclose(grad[minima],0))]
-    maxima = maxima[np.logical_not(np.isclose(grad[maxima],0))]
+    try:
+      figTitle = kwargs.pop('figTile')
+    except KeyError:
+      figTile='Date: '+self.date+', Order: '+str(self.order) 
 
-    leftEdge  = maxima[0]
-    rightEdge = minima[-1]
+    data, applyRowCuts, applyColCuts, applyBothCuts = hru.trimData(self.data, 
+                                          applyRowCuts, applyColCuts, applyBothCuts,
+                                          rowCuts, colCuts, doAutoTrimCols,
+                                          showPlots=showPlots,
+                                          figTile=figTile,
+                                          **kwargs) 
 
-    # Find minima of second derivative just inside of the walls found above
-    # this is an indicator of the corners - where the wall starts
-    secondGrad = np.gradient(grad)
-    secondMinima = getLocalMinima(secondGrad,neighborhood_size)
+    # record results and log to order of operations
+    self.data = data
+    self.times                 = applyRowCuts[0]
+    self.barycentricCorrection = applyRowCuts[1]
+    self.wavelengths           = applyColCuts[0]
+    self.errors                = applyBothCuts[0]
 
-    rightDelta = rightEdge - minima2
-    rightCorner = rightEdge - np.min(rightDelta[rightDelta>0])
-
-    leftDelta  = minima2 - leftEdge
-    leftCorner = np.min(leftDelta[leftDelta>0]) + leftEdge
-
-    if plotResult:
-      plt.figure()
-      norm_data = normalize(signal)
-      norm_smooth = normalize(smooth)
-
-      plt.plot(norm_data-np.median(norm_data),label='Data')
-      plt.plot(norm_smooth - np.median(norm_smooth),label='Smoothed')
-      plt.plot((leftCorner,leftCorner),(-0.5,0.5), color='C3')
-      plt.plot((rightCorner,rightCorner),(-0.5,0.5), color='C3')
-
-      plt.legend()
-      plt.set_title('Edge Trimming\nLeft: '+str(leftCorner)+', Right: '+str(rightCorner))
-      plt.set_xlabel('Column Number')
-      plt.set_ylabel('Normalized Flux')
-
-      plt.show()
-
-    return leftCorner, rightCorner
-
-  def findEdgeCuts_numeric(flux, edge, rightEdge=None, relative=True, plotResult=False):
-    '''
-      Finds locations to cut the edges of data based on a numeric value entered
-
-      Parameters:
-        flux (array): 2d array of flux as (time, wavelength)
-
-        edge (int): how many points to trim from either side
-
-        rightEdge (int): (optional) If entered, will use edge to trim from the left, rightEdge to trim from the right
-
-        relative (bool): (optional) If true, cuts are relative to length of data (i.e. edge = 10 takes 10 points from each side). If false, cuts are absolute (i.e. edge = 10, rightEdge = 1100 cuts between 10 and 1100)
-          
-        plotResult (bool): if True, plot the cuts to visualize
-
-      Returns:
-        left_bound, right_bound (int) - the indexes of the found 'edges'
-    '''
-
-    n = np.shape(flux)[1]
-
-    left_bound = edge
-
-    if rightEdge is None:
-      if relative:
-        right_bound = n-edge
-      else:
-        raise ValueError('rightEdge must be specified for non-relative cuts.')
-    else:
-      if relative:
-        right_bound = n-rightEdge
-      else:
-        right_bound = rightEdge
-
-    if plotResult:
-      normData = normalize(np.median(flux,0))
-      plt.figure()
-      plt.plot(normData-np.median(normData),label='Median Spectrum')
-      plt.plot((left_bound,left_bound),(-0.5,0.5), color='C2')
-      plt.plot((right_bound,right_bound),(-0.5,0.5), color='C2')
-      plt.legend()
-
-      plt.set_title('Edge Trimming\nLeft: '+str(left_bound)+', Right: '+str(right_bound))
-      plt.set_xlabel('Column Number')
-      plt.set_ylabel('Normalized Flux')
-      plt.show()
-
-    return left_bound, right_bound
-
- 
+    self.dataStage.append('Trimmed')
   ###
 
