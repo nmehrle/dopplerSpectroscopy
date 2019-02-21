@@ -1,7 +1,12 @@
-import numpy as np
 import json
 
 from utility import *
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+from scipy import ndimage as ndi
+
 
 class hrsObs:
   '''
@@ -326,15 +331,193 @@ class hrsObs:
   ###
 
   #-- Processing Data
-    '''
-      These functions are for processing the raw data.
-      All require raw data having been collected as per collectRawData()
+  '''
+    These functions are for processing the raw data.
+    All require raw data having been collected as per collectRawData()
+  '''
+
+  def trimData():
     '''
 
-    def trimData():
-      '''
+    '''
+    return 1
 
-      '''
-      return 1
+  def findEdgeCuts_xcor(flux, neighborhood_size=30, plotResult=False):
+    '''
+      Detects 'edges' in flux as regions where time-wise SNR dramatically drops off from the center. 
+
+      Find edges by cross correlating snr with a step function and getting first minima/last maxima. 
+
+      Parameters:
+        flux (array): 2d array of flux as (time, wavelength)
+
+        neighborhood_size (int): the region around each point to smooth snr/search for extrema
+
+        plotResult (bool): if True, plot the cuts to visualize
+
+      Returns:
+        left_bound, right_bound (int) - the indexes of the found 'edges'
+    '''
+    # Calculate column (time)-wise SNR in flux
+    col_snr = np.nan_to_num(np.apply_along_axis(snr,0,flux))
+    col_snr = col_snr - np.mean(col_snr)
+
+    # Apply minimum filter
+    smooth = ndi.minimum_filter(col_snr, neighborhood_size)
+
+    # Create step function and cross-correlate with data
+    n = int(len(smooth)/2)
+    step = np.concatenate((np.ones(n),-1*np.ones(n)))
+    xcor = np.correlate(smooth-np.mean(smooth), step, 'same')
+
+    # return first minima - step up in col_snr in begining
+    # return last  maxima - step down in col_snr at end
+    xcorMinima = getLocalMinima(xcor, neighborhood_size)
+    xcorMaxima = getLocalMaxima(xcor, neighborhood_size)
+    left_bound  = xcorMinima[0]
+    right_bound = xcorMaxima[-1]
+
+    if plotResult:
+      # Plot snr, xcor, and cuts
+      plt.figure()
+      norm_snr = normalize(col_snr)
+      norm_smooth = normalize(smooth)
+
+      plt.plot(norm_snr-np.median(norm_snr),label='Column SNR')
+      plt.plot(norm_smooth - np.median(norm_smooth),label='Minimum Filter')
+      plt.plot(normalize(xcor, (-0.5,0)),label='Cross Correlation')
+      plt.plot(normalize(np.median(flux,0),(-1,-0.5)), label='Median Flux')
+      plt.plot((left_bound,left_bound),(-1.0,0), color='C2')
+      plt.plot((right_bound,right_bound),(-1.0,0), color='C2')
+      plt.legend()
+
+      plt.set_title('Edge Trimming\nLeft: '+str(left_bound)+', Right: '+str(right_bound))
+      plt.set_xlabel('Column Number')
+      plt.set_ylabel('Normalized SNR')
+      plt.show()
+
+    return left_bound, right_bound
+
+  def findEdgeCuts_gradient(flux, gaussian_blur = 10, neighborhood_size = 30,
+                            plotResult=False
+  ):
+    '''
+      Detects 'edges' as regions where second derivitive is minimized just inside where the derivitive is minimized (right) or maximized (left). 
+
+      Parameters:
+        flux (array): 2d array of flux as (time, wavelength) 
+
+        gaussian_blur (int) : the sigma to use when applying a gaussian filter to the data
+
+        neighborhood_size (int): the region around each point to smooth snr/search for extrema
+
+        plotResult (bool): if True, plot the cuts to visualize
+
+      Returns:
+        leftCorner, rightCorner (int) - the indexes of the found 'edges'
+    '''
+
+    # Smooth and get gradeint of median spectrum
+    signal = np.median(flux,0)
+    smooth = ndi.gaussian_filter(signal, gaussian_blur)
+    grad = np.gradient(smooth)
+
+    # Find minima on left, maxima on right -> indicate where data drops off the fastest 
+    # This is the middle point of the edge
+    maxima = getLocalMaxima(grad,neighborhood_size)
+    minima = getLocalMinima(grad, neighborhood_size)
+
+    # remove points that are both minima and maxima
+    minima_store = minima
+    minima = np.setdiff1d(minima,maxima)
+    maxima = np.setdiff1d(maxima,minima_store)
+
+    # remove points where minima/maxima = 0
+    minima = minima[np.logical_not(np.isclose(grad[minima],0))]
+    maxima = maxima[np.logical_not(np.isclose(grad[maxima],0))]
+
+    leftEdge  = maxima[0]
+    rightEdge = minima[-1]
+
+    # Find minima of second derivative just inside of the walls found above
+    # this is an indicator of the corners - where the wall starts
+    secondGrad = np.gradient(grad)
+    secondMinima = getLocalMinima(secondGrad,neighborhood_size)
+
+    rightDelta = rightEdge - minima2
+    rightCorner = rightEdge - np.min(rightDelta[rightDelta>0])
+
+    leftDelta  = minima2 - leftEdge
+    leftCorner = np.min(leftDelta[leftDelta>0]) + leftEdge
+
+    if plotResult:
+      plt.figure()
+      norm_data = normalize(signal)
+      norm_smooth = normalize(smooth)
+
+      plt.plot(norm_data-np.median(norm_data),label='Data')
+      plt.plot(norm_smooth - np.median(norm_smooth),label='Smoothed')
+      plt.plot((leftCorner,leftCorner),(-0.5,0.5), color='C3')
+      plt.plot((rightCorner,rightCorner),(-0.5,0.5), color='C3')
+
+      plt.legend()
+      plt.set_title('Edge Trimming\nLeft: '+str(leftCorner)+', Right: '+str(rightCorner))
+      plt.set_xlabel('Column Number')
+      plt.set_ylabel('Normalized Flux')
+
+      plt.show()
+
+    return leftCorner, rightCorner
+
+  def findEdgeCuts_numeric(flux, edge, rightEdge=None, relative=True, plotResult=False):
+    '''
+      Finds locations to cut the edges of data based on a numeric value entered
+
+      Parameters:
+        flux (array): 2d array of flux as (time, wavelength)
+
+        edge (int): how many points to trim from either side
+
+        rightEdge (int): (optional) If entered, will use edge to trim from the left, rightEdge to trim from the right
+
+        relative (bool): (optional) If true, cuts are relative to length of data (i.e. edge = 10 takes 10 points from each side). If false, cuts are absolute (i.e. edge = 10, rightEdge = 1100 cuts between 10 and 1100)
+          
+        plotResult (bool): if True, plot the cuts to visualize
+
+      Returns:
+        left_bound, right_bound (int) - the indexes of the found 'edges'
+    '''
+
+    n = np.shape(flux)[1]
+
+    left_bound = edge
+
+    if rightEdge is None:
+      if relative:
+        right_bound = n-edge
+      else:
+        raise ValueError('rightEdge must be specified for non-relative cuts.')
+    else:
+      if relative:
+        right_bound = n-rightEdge
+      else:
+        right_bound = rightEdge
+
+    if plotResult:
+      normData = normalize(np.median(flux,0))
+      plt.figure()
+      plt.plot(normData-np.median(normData),label='Median Spectrum')
+      plt.plot((left_bound,left_bound),(-0.5,0.5), color='C2')
+      plt.plot((right_bound,right_bound),(-0.5,0.5), color='C2')
+      plt.legend()
+
+      plt.set_title('Edge Trimming\nLeft: '+str(left_bound)+', Right: '+str(right_bound))
+      plt.set_xlabel('Column Number')
+      plt.set_ylabel('Normalized Flux')
+      plt.show()
+
+    return left_bound, right_bound
+
+ 
   ###
 
