@@ -293,7 +293,7 @@ class hrsObs:
 
       Creates:
         self.rawFlux
-        self.errors
+        self.error
         self.wavelengths
         self.times
         self.barycentricCorrection
@@ -313,7 +313,7 @@ class hrsObs:
       headers = readFile(headerFile)
 
       self.rawFlux = rawData['fluxes']
-      self.errors  = rawData['errors']
+      self.error   = rawData['errors']
       self.wavelengths = rawData['waves']
 
       self.times = np.array(headers['JD'])
@@ -390,7 +390,7 @@ class hrsObs:
     # run highResUtils.trimData()
     applyRowCuts  = [self.times, self.barycentricCorrection]
     applyColCuts  = [self.wavelengths]
-    applyBothCuts = [self.errors]
+    applyBothCuts = [self.error]
 
     try:
       figTitle = kwargs.pop('figTile')
@@ -409,8 +409,69 @@ class hrsObs:
     self.times                 = applyRowCuts[0]
     self.barycentricCorrection = applyRowCuts[1]
     self.wavelengths           = applyColCuts[0]
-    self.errors                = applyBothCuts[0]
+    self.error                 = applyBothCuts[0]
 
     self.dataStage.append('Trimmed')
+
+  def getAlignmentOffset(self, padLen=None, peak_half_width=3,
+                        upSampleFactor=1000, verbose=False
+  ):
+    '''
+      Caclulates the alignment offset of each spectrum and the spectrum with the highest SNR. Returns that offset. 
+
+      Parameters:
+        padLen (int): amount of zeros to pad to array before fft 
+
+        peak_half_width (int): number of points to include in a region around the xcor peak when upsampling
+
+        upSampleFactor (int): factor by which to upsample the data when interpolating. Limits the precision 
+            of the returned centers (i.e. an upSampleFactor of 10 can find peaks to a 0.1 precision level)
+
+      Returns:
+        offsets (1d-array): Wavelength offsets of each spectrum in pixel terms
+    '''
+
+    highSNR   = hru.getHighestSNR(self.data, self.error)
+    reference = self.data[highSNR].copy()
+
+    offsets = hru.alignment(self.data, reference,
+                        returnOffset=True, padLen=padLen,
+                        peak_half_width=peak_half_width,
+                        upSampleFactor=upSampleFactor,
+                        verbose=verbose)
+
+    return offsets
+
+  def alignData(self, iterations=1, padLen=None,
+                peak_half_width=3, upSampleFactor=1000,
+                verbose=False
+  ):
+    '''
+      Aligns the data to the wavelength solution of the spectrum with the highest SNR. 
+
+      Parameters:
+        iterations (int): Number of times to perform alignment 
+
+        padLen (int): amount of zeros to pad to array before fft 
+
+        peak_half_width (int): number of points to include in a region around the xcor peak when upsampling
+
+        upSampleFactor (int): factor by which to upsample the data when interpolating. Limits the precision 
+            of the returned centers (i.e. an upSampleFactor of 10 can find peaks to a 0.1 precision level)
+    '''
+
+    highSNR   = hru.getHighestSNR(self.data, self.error)
+    reference = self.data[highSNR].copy()
+
+    data, error = hru.alignment(self.data, reference, iterations=iterations,
+                        error=self.error, padLen=padLen,
+                        peak_half_width=peak_half_width,
+                        upSampleFactor=upSampleFactor,
+                        verbose=verbose)
+
+    self.data = data
+    self.error = error
+
+    self.dataStage.append('Aligned')
   ###
 

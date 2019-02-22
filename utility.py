@@ -2,7 +2,7 @@ import pickle
 import numpy as np
 
 from scipy import ndimage as ndi
-from scipy import optimize
+from scipy import optimize, interpolate
 
 from astropy.io import fits
 from astropy.time import Time

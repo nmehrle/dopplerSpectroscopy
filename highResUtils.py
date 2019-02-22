@@ -4,6 +4,22 @@ import matplotlib.pyplot as plt
 from scipy import ndimage as ndi
 
 from utility import *
+
+def type_of_script():
+    try:
+        ipy_str = str(type(get_ipython()))
+        if 'zmqshell' in ipy_str:
+            return 'jupyter'
+        if 'terminal' in ipy_str:
+            return 'ipython'
+    except:
+        return 'terminal'
+
+if type_of_script() == 'jupyter':
+  from tqdm import tqdm_notebook as tqdm
+else:
+  from tqdm import tqdm
+
 '''
   This package provides functions for doppler spectroscopy that are generic to input data. 
 
@@ -319,5 +335,187 @@ def trimData(flux,
 
   return flux,applyRowCuts, applyColCuts,applyBothCuts
 
+
+def getHighestSNR(flux, error):
+  '''
+    Gives the index of the spectrum with the hightest median SNR in flux as flux/error
+
+    Parameters:
+      flux (array): 2d array of flux as (time, wavelength)
+
+      error (array): array of errors on flux
+
+    Returns:
+      highestSNR (int): index of spectrum with highest SNR in flux
+  '''
+  snrs = np.median(flux/error, 1)
+  return np.argmax(snrs)
+
+def calcCorrelationOffset(corr, ref_corr,
+                      peak_half_width = 3,
+                      upSampleFactor  = 1000,
+                      fourier_domain  = False,
+                      n               = None,
+                      verbose         = False
+):
+  '''
+    Returns the correlation function offsets of corr relative to ref_corr.
+    Calculates the location of the peak of the Xcor function by selecting a region around the peak and 
+    Interpolating to upsample that region. Then give the center of the upsampled peak
+
+    Parameters:
+      corr (2d - array): array of cross correlation functions to find the offsets of
+
+      ref_corr (1d - array): cross correlation function to use as a reference - 
+          the center of the peak of this is considered the true zero point
+
+      peak_half_width (int): number of points to include in a region around the xcor peak when upsampling
+
+      upSampleFactor (int): factor by which to upsample the data when interpolating. Limits the precision 
+          of the returned centers (i.e. an upSampleFactor of 10 can find peaks to a 0.1 precision level)
+
+      fourier_domain (bool): whether or not corr is an array of fourier transformed correlation functions
+
+      n (int): the length of the original reference array for calculating inverse fft 
+
+      verbose (bool): anounce actions if True
+
+    Returns:
+      offsets (1d - array): values of offsets for each row of corr
+  '''
+  if fourier_domain:
+    corr     = ifftCorrelation(corr, n)
+    ref_corr = ifftCorrelation(ref_corr, n)
+
+
+  # Calculate the reference position
+  # done by upsampling the peak
+  zero_point = np.argmax(ref_corr)
+  ref_lb = zero_point - peak_half_width
+  ref_rb = zero_point + peak_half_width + 1
+
+  ref_x = range(ref_lb,ref_rb)
+  ref_peak = ref_corr[ref_lb:ref_rb]
+
+  upSampX, upSampPeak = upSampleData(ref_x, ref_peak, upSampleFactor=upSampleFactor)
+  zero_point =  upSampX[np.argmax(upSampPeak)]
+
+  seq = range(len(corr))
+  if verbose:
+    seq = tqdm(seq, desc='Calculating Correlation Offsets')
+
+  centers = []
+  # Isolate the peak of each Xcor Func and find it's center
+  for i in seq:
+    xcor = corr[i]
+    mid_point = np.argmax(xcor)
+
+    # upsample the peak of the CrossCorrelation function
+    xcor_lb = mid_point - peak_half_width
+    xcor_rb = mid_point + peak_half_width + 1
+
+    # Record the x-positions and values of the Xcor peak
+    peak_x = range(xcor_lb,xcor_rb)
+    peak = xcor[xcor_lb:xcor_rb]
+
+
+    upSampX, upSampPeak = upSampleData(peak_x, peak, upSampleFactor=upSampleFactor)
+
+    center = upSampX[np.argmax(upSampPeak)]
+    centers.append(center)
+
+  # Gives the difference between the reference center, and each calculated center
+  offsets = zero_point - np.array(centers)
+
+  return offsets
+
+def alignment(flux, ref, iterations = 1,
+             error=None, padLen = None,
+             peak_half_width = 3, upSampleFactor = 1000,
+             returnOffset = False, verbose = False):
+  '''
+    Aligns the spectra in flux to the reference spectrum ref. 
+    Performs alignments iteratively as commanded. 
+
+    Finds offset by calculating the cross correlation with the reference and finding the peak location
+
+    Applys offset to flux and error and returns it
+
+    Parameters:
+      flux (2d-array): 2d array of flux as (time, wavelength)
+
+      ref (1d-array): Reference spectrum 
+
+      iterations (int): Number of times to perform alignment 
+
+      error (2d-array): errors on flux to also align
+
+      padLen (int): amount of zeros to pad to array before fft 
+
+      peak_half_width (int): number of points to include in a region around the xcor peak when upsampling
+
+      upSampleFactor (int): factor by which to upsample the data when interpolating. Limits the precision 
+          of the returned centers (i.e. an upSampleFactor of 10 can find peaks to a 0.1 precision level)
+
+      return Offset (bool): If true, returns the offsets, not the shifted flux
+
+    Returns:
+      shifted_flux (2d-array): Flux after alignment correction
+
+      shifted_error (2d-array): Error after alignment correction
+  '''
+  if iterations <=0:
+    if error is not None:
+      return flux, error
+    return flux
+
+  if verbose and not returnOffset:
+    print(str(iterations) + ' alignment iterations remaining.')
+
+  m,n = np.shape(flux)
+
+  # Mean subtract for cross correlation
+  row_means = np.mean(flux, 1, keepdims=True)
+  flux = flux - row_means
+  ref  = ref  - np.mean(ref)
+
+  # Pad data with zeros, helps with fft correlation
+  # Limits the issues with circular correlation
+  # See https://dsp.stackexchange.com/questions/741/why-should-i-zero-pad-a-signal-before-taking-the-fourier-transform
+  if padLen is None:
+    padLen = int(n/2)
+  ref  = np.pad(ref, padLen, 'constant')
+  flux = np.pad(flux, ((0,0),(padLen,padLen)), 'constant')
+
+  # fft_n is the length of the fft, after it has been padded up to length of a power of 2
+  ref_fft = rfft(ref)
+  flux_fft, fft_n = rfft(flux, returnPadLen=True)
+
+  #correlate the data
+  flux_corr_fft = correlate(flux_fft, ref_fft, fourier_domain=True)
+  ref_corr_fft  = correlate(ref_fft, ref_fft, fourier_domain=True)
+
+  offsets = calcCorrelationOffset(flux_corr_fft, ref_corr_fft,
+                                fourier_domain=True, n=len(ref), 
+                                peak_half_width=peak_half_width,
+                                upSampleFactor=upSampleFactor,
+                                verbose=verbose)
+
+  if returnOffset:
+    return offsets
+
+  # Apply shifts to data
+  shifted_fft = fourierShift2D(flux_fft, offsets, n=fft_n, fourier_domain=True)
+  if error is not None:
+    shifted_error = fourierShift2D(error, offsets, fourier_domain=False)
+  else:
+    shifted_error = None
+
+  # Un-fft and remove padding
+  # replace means
+  shifted_flux = np.fft.irfft(shifted_fft)[:,padLen:n+padLen] + row_means
+  return alignment(shifted_flux, ref, iterations=iterations-1,
+                    error=shifted_error, padLen=padLen, peak_half_width=peak_half_width,
+                    upSampleFactor=upSampleFactor, verbose=verbose)
 ###
 
