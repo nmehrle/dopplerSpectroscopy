@@ -239,7 +239,7 @@ def findEdgeCuts_numeric(flux, edge=0, rightEdge=None, relative=True,
 def trimData(flux,
           applyRowCuts=None, applyColCuts=None, applyBothCuts=None,
           rowCuts=None, colCuts=None, doAutoTrimCols=False, colTrimFunc=findEdgeCuts_xcor,
-          showPlots=False, figsize=(12,8), figTitle="", **kwargs
+          plotResult=False, figsize=(12,8), figTitle="", **kwargs
 ):
   '''
     Applys cuts to an array of data
@@ -265,9 +265,9 @@ def trimData(flux,
                                 findEdgeCuts_gradient (gaussian_blur, neighborhood_size)
                                 findEdgeCuts_numeric (edge, rightEdge, relative)
 
-      showPlots (bool): Set true to show the cuts made
+      plotResult (bool): Set true to show the cuts made
 
-      figsize (tuple of 2 integers): figure size for showPlots
+      figsize (tuple of 2 integers): figure size for plotResult
 
       figTitle (str): Title for figure
 
@@ -307,7 +307,7 @@ def trimData(flux,
       for i in range(len(applyBothCuts)):
         applyBothCuts[i] = applyBothCuts[i][...,colMask]
 
-  if showPlots:
+  if plotResult:
     fig, axs = plt.subplots(2,1,figsize=figsize)
     fig.suptitle(figTitle, size=16)
     axs[0].set_title('Row wise SNR (mean/std) \n After hard cuts, before bounds')
@@ -318,7 +318,7 @@ def trimData(flux,
     axs=[None,None]
 
   if doAutoTrimCols:
-    leftEdge, rightEdge = colTrimFunc(flux, plotResult=showPlots, ax=axs[1], **kwargs)
+    leftEdge, rightEdge = colTrimFunc(flux, plotResult=plotResult, ax=axs[1], **kwargs)
 
     flux = flux[...,leftEdge:rightEdge]
     if applyColCuts is not None:
@@ -328,7 +328,7 @@ def trimData(flux,
       for i in range(len(applyBothCuts)):
         applyBothCuts[i] = applyBothCuts[i][...,leftEdge:rightEdge]
 
-  if showPlots:
+  if plotResult:
     plt.tight_layout()
     plt.subplots_adjust(top=0.9)
     plt.show()
@@ -432,7 +432,8 @@ def calcCorrelationOffset(corr, ref_corr,
 def alignment(flux, ref, iterations = 1,
              error=None, padLen = None,
              peak_half_width = 3, upSampleFactor = 1000,
-             returnOffset = False, verbose = False):
+             returnOffset = False, verbose = False
+):
   '''
     Aligns the spectra in flux to the reference spectrum ref. 
     Performs alignments iteratively as commanded. 
@@ -517,5 +518,215 @@ def alignment(flux, ref, iterations = 1,
   return alignment(shifted_flux, ref, iterations=iterations-1,
                     error=shifted_error, padLen=padLen, peak_half_width=peak_half_width,
                     upSampleFactor=upSampleFactor, verbose=verbose)
+
+def getTimeMask(flux, relativeCutoff=3, absoluteCutoff=0,
+                smoothingFactor=0, plotResult=False
+):
+  '''
+    Calculates a boolean mask based on which columns in flux have low SNR.
+    Low SNR is defined as a SNR of (relativeCutoff) sigma below the mean SNR,
+    or as an SNR below (absoluteCutoff)
+
+    Parameters:
+      flux (2d-array): 2d array of flux as (time, wavelength)
+
+      relativeCutoff (positive float): Mask columns with SNR this sigma below the mean SNR
+
+      absoluteCutoff (float): Mask columns with SNR below this value
+
+      smoothingFactor (int): Number of columns around a masked column to also mask
+
+    Returns:
+      mask (1d-array): Boolean array of 1's for good columns, 0's for bad columns
+  '''
+
+  # Calculate SNRs
+  weights = np.nan_to_num(np.apply_along_axis(snr, 0, flux))
+
+  if np.any(weights < 0):
+    print('Warning, some weights (SNRs) are less than zero, consider using non zero-mean values for generating mask')
+
+  weightMean = np.mean(weights)
+  weightStd  = np.std(weights)
+
+  lowerMask = weights < weightMean - relativeCutoff*weightStd
+  absoluteMask = weights < absoluteCutoff
+
+  # combine the masks and make it so 1 is good, 0 is bad
+  mask = 1 - np.logical_or(lowerMask, absoluteMask)
+
+  # widen the mask by smoothing factor
+  mask = ndi.minimum_filter(mask, smoothingFactor)
+
+  if plotResult:
+    plt.figure(figsize=(12,8))
+    plt.subplot(211)
+    plt.title('Column wise SNRs')
+    plt.plot(weights)
+    n = len(weights)
+    colors = ['C1','C2','C3','C4']
+
+    # Plot sigma lines
+    labels = ['Mean','1 sigma','2 sigma','3 sigma']
+    for i in range(-3,4):
+      ls = '-'
+      lab = labels[np.abs(i)]
+      if i < 0:
+        lab = ""
+      plt.plot((0,n),(weightMean+i*weightStd,weightMean+i*weightStd),
+        label=lab, linestyle=ls, color=colors[np.abs(i)])
+
+    # plot absolute cutoff
+    plt.plot((0,n),(absoluteCutoff,absoluteCutoff),label='Absolute Cutoff',
+      linestyle='--',color='k')
+
+    plt.legend(frameon=True,loc='best')
+
+    # Show full mask
+    plt.subplot(212)
+    plt.title('Time Mask')
+    plt.plot(normalize(np.median(flux,0)))
+    plt.plot(mask)
+    plt.ylim(-0.2,1.2)
+    plt.show()
+
+  return mask
+
+def getWaveMask(flux, windowSize=25, relativeCutoff=3,
+                absoluteCutoff=0, smoothingFactor=0,
+                plotResult=False
+):
+  '''
+    Calculates a boolean mask based on the SNR of a region around each column. This method finds regions of sharp change in flux which correspond to deep telluric absorbtion.
+
+    Regions of low SNR are masked
+    Low SNR is defined as a SNR of (relativeCutoff) sigma below the mean SNR,
+    or as an SNR below (absoluteCutoff)
+
+    Parameters:
+      flux (2d-array): 2d array of flux as (time, wavelength)
+
+      windowSize (int): Size of region around each wavelength column to consider for calculating SNR
+
+      relativeCutoff (positive float): Mask columns with SNR this sigma below the mean SNR
+
+      absoluteCutoff (float): Mask columns with SNR below this value
+
+      smoothingFactor (int): Number of columns around a masked column to also mask
+
+    Returns:
+      mask (1d-array): Boolean array of 1's for good columns, 0's for bad columns
+  '''
+
+  # Calulate weights
+  medSpec = np.median(flux, 0)
+  weights = ndi.generic_filter(medSpec, snr, size=windowSize)
+
+  weightMean = np.mean(weights)
+  weightStd  = np.std(weights)
+
+  # create masks
+  lowerMask = weights < weightMean - relativeCutoff*weightStd
+  absoluteMask = weights < absoluteCutoff
+
+  # combine the masks and make it so 1 is good, 0 is bad
+  mask = 1 - np.logical_or(lowerMask, absoluteMask)
+
+  # widen the mask by smoothing factor
+  mask = ndi.minimum_filter(mask, smoothingFactor)
+
+  if plotResult:
+    plt.figure(figsize=(6,8))
+    plt.subplot(211)
+    plt.title('Windowed SNR along row')
+    plt.plot(weights)
+    n = len(weights)
+    colors = ['C1','C2','C3','C4']
+
+    # Plot Relative cutoffs
+    labels = ['Mean','1 sigma','2 sigma','3 sigma']
+    for i in range(-3,4):
+      ls = '-'
+      lab = labels[np.abs(i)]
+      if i < 0:
+        lab = ""
+      plt.plot((0,n),(weightMean+i*weightStd,weightMean+i*weightStd),
+        label=lab, linestyle=ls, color=colors[np.abs(i)])
+
+    # Plot Rbsolute cutoffs
+    plt.plot((0,n),(absoluteCutoff,absoluteCutoff),label='Absolute Cutoff',
+      linestyle='--',color='k')
+
+    plt.legend(frameon=True)
+    
+    plt.subplot(212)
+    plt.title('Wave Mask')
+    plt.plot(normalize(np.median(flux,0)))
+    plt.plot(mask)
+    plt.ylim(-0.2,1.2)
+    plt.show()
+
+  return mask
+
+def combineMasks(*masks, smoothingFactor=20):
+  '''
+    Combines the input binary masks and widens each mask element by smoothingFactor
+
+    Parameters:
+      masks (1D array): Binary arrays to be combined with one another
+
+      smoothingFactor (int): Amount to widen each mask element by
+    Returns:
+      combinedMask (1D array): Binary array of combined masks
+  '''
+  mask = np.prod(masks,0)
+  return ndi.minimum_filter(mask, smoothingFactor)
+
+def applyMask(data, mask):
+  '''
+    Applys binary mask to data and subtracts mean from data row-wise.
+    Applys mask such that after subtracting the mean, masked regions have a zero value.
+
+    Parameters:
+      data (2d-array): 2d array of data
+
+      mask (1d-array): Binary array of which columns of data to mask
+
+    Returns:
+      masked (2d-array): data with row-means subtracted and masked columns set to zero-value
+  '''
+
+  # Calculates what the mean will be excluding masked columnns
+  numUnmasked = np.sum(mask)
+  newMean = np.sum(data*mask, -1, keepdims=1)/numUnmasked
+
+  # Subtracts the new mean and applys mask
+  # Rows of masked now have zero mean, masked regions have zero value
+  masked = data - newMean
+  masked = masked * mask
+
+  return masked
+
+def sysrem():
+  return 1
+
+def varianceWeighting(data, axis=-2):
+  '''
+    Weights the data by the variance along axis, default is -2
+
+    For data.ndim = 2: Uses the column variance
+    For data.ndim = 3: Uses the column variance of each image
+
+    Parameters:
+      data (2+ D array): Input data to weight by variance
+
+      axis (int): axis along which to apply variance weighting
+
+    Returns:
+      weighted (array): Data after variance weighting is applied
+  '''
+  
+  return np.nan_to_num(data/np.var(data,-2, keepdims=1))
+
 ###
 

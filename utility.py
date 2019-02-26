@@ -232,6 +232,47 @@ def findCenterOfPeak(x,y, peak_half_width = 10):
 
   return center
 
+def polynomialSubtract(data, polynomialOrder, error=None):
+  '''
+    Removes a best fit polynomial of order polynomialOrder from data
+    Works for 1d/2d data. If data is 2d, removes polynomial from each array in data
+
+    Parameters:
+      data (1d/2d array): data from which to remove best fit polynomial
+
+      polynomialOrder (int): order of polynomial to remove
+
+      error (array): errors on data to use for weighting in polynomial fit. same shape as data
+
+    Retuns:
+      data: input data after polynomial subtraction
+  '''
+  is1D = (np.ndim(data)==1)
+
+  seq = data
+  if is1D:
+    seq = [data]
+  
+  weights = None
+  if error is not None:
+    weights = 1/error
+
+  result = []
+  x = np.arange(np.shape(data)[-1])
+
+  for i in range(len(seq)):
+    arr = seq[i]
+    w   = weights[i]
+
+    fit_polynomial = np.polyfit(x, arr, order, w=w)
+    polynomial = np.polyval(fit_polynomial, x)
+    result.append(arr - polynomial)
+
+  if is1D:
+    result = result[0]
+
+  return np.array(result)
+
 def getSpacing(arr):
   return (arr[-1]-arr[0])/(len(arr)-1)
 
