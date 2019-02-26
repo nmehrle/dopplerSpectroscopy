@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy import ndimage as ndi
+from scipy import signal, interpolate
 
 from utility import *
 
@@ -707,8 +708,124 @@ def applyMask(data, mask):
 
   return masked
 
-def sysrem():
-  return 1
+def sysrem(data, error, ncycles=1,
+           initialGuess=None,
+           maxIterations=200,
+           maxError=0.001,
+           verbose=False,
+           returnAll=True
+):
+  '''
+    Implementation of the Sysrem de-trending algorithm from (Tamuz+ 2005). See also (Mazeh+ 2007). Removes systematic effects from many lightcurves. A variant of PCA with non-equal errors.
+
+    Given a 2d-array of data, removes linear trends in the vertical (along columns) direction.
+
+    Removes the trends found and returns either the residual data, or the list of succsessive residuals after each cycle
+
+    Parameters:
+      data (2d-array): Data aranged so each column represents an "independent lightcurve". Can be used so that
+          each column represents a wavelength channel and each row a spectrum
+      error (2d-array): error on the values in data
+
+      ncycles (positive int): Number of cycles to run sysrem. Analogous to number of Prinicpal Components to
+          remove
+
+      initalGuess (vector): Inital guess of trend to remove
+
+      maxIterations (int): How many iterations to attempt on fitting each trend before aborting
+
+      maxError (float): Maximum amount a found trend can vary by before it is considered stationary (and the
+          algorithm converged)
+
+      verbose (bool): Print progress of algorithm
+
+      returnAll (bool): Whether to return the final residuals, or each set of residuals after each cycle
+
+    Returns:
+      residuals (2d-array): data after linear trends are removed
+  '''
+
+  # Sysrem works on N lightcurves each of M points
+  # Analogous to N wavelength channels of M observations in each
+  # Assume data is passed so each row is a spectrum or each column is a lightcurve
+  M,N = np.shape(data)
+
+  # Subtract the mean from each column
+  # subtracts mean from each lightcurve
+  residuals = data - np.mean(data,0)
+
+  allResiduals = [residuals]
+
+  # Set initial guess if none passed
+  if initialGuess == None:
+    initialGuess = np.ones(M)
+
+  invErrorSq = 1/(error**2)
+
+  # Initialize a and c
+  # a is a trend constant at a single time (e.g. airmass)
+  # c is a trend constant for each lightcurve (e.g. extinction coefficient)
+  aVec = initialGuess
+  cVec = np.ones(N)
+
+  if verbose:
+    print('Starting Sysrem')
+
+  for cycle in range(ncycles):
+    if verbose:
+      print('Starting Cycle '+str(cycle+1),flush=True)
+      pbar = tqdm(total=100, desc='Cycle '+str(cycle+1))
+
+    aVecError = maxError * 10
+    cVecError = maxError * 10
+
+    iterations = 0
+
+    # Succsessively calculate an a and c from the inital guess until both converge
+    # When converged, we have found the a,c that work for Tamuz+ 2005 Eq 1
+    while iterations <= maxIterations and (aVecError >= maxError or cVecError >= maxError):
+      # Store last a and c for calculating difference
+      last_aVec = aVec
+      last_cVec = cVec
+
+      # Tamuz+ 2005 Eq 2
+      cVecNum = np.sum( (residuals * aVec[:,np.newaxis]) * invErrorSq, 0)
+      cVecDen = np.sum( ((aVec**2)[:,np.newaxis])        * invErrorSq, 0)
+      cVec = cVecNum/cVecDen
+
+      # Tamuz+ 2005 Eq 4
+      aVecNum = np.sum( residuals * cVec * invErrorSq, 1)
+      aVecDen = np.sum( cVec**2          * invErrorSq ,1)
+      aVec = aVecNum/aVecDen
+
+      # Calculate difference from last a,c for convergence
+      aVecError = np.median(np.nan_to_num(np.abs(last_aVec / aVec -1 )))
+      cVecError = np.median(np.nan_to_num(np.abs(last_cVec / cVec - 1 )))
+
+      if verbose:
+        largestError = np.max((aVecError, cVecError))
+        convergence = 1/(np.log(largestError/maxError)+1)
+        if largestError <= maxError:
+          convergence = 1
+
+        pbarVal = int(convergence*100)
+        pbar.update(max(pbarVal-pbar.n, 0))
+
+      iterations += 1
+    # a,c have converged
+    # we have found the best fit trends for this cycle of sysrem
+    # model the data from these trends
+    thisModel = np.outer(aVec,cVec)
+
+    # calculate new set of residuals
+    residuals = residuals - thisModel
+    allResiduals.append(residuals)
+
+  # Finished full set of sysrem cycles
+  if returnAll:
+    return np.array(allResiduals)
+  else:
+    return allResiduals[-1]
 
 def varianceWeighting(data, axis=-2):
   '''
@@ -727,6 +844,97 @@ def varianceWeighting(data, axis=-2):
   '''
   
   return np.nan_to_num(data/np.var(data,-2, keepdims=1))
-
 ###
 
+#-- Comparing Data to template
+def generateXCM(data, template,
+                normalizeXCM=True,
+                xcorMode='same',
+                verbose=False
+):
+  '''
+    Caclulates the cross-correlation of each row of data versus template. Assembles the resultant
+    cross correlation functions into a matrix and returns result.
+
+    Parameters:
+      data (2d-array): 2d array of processed spectra. Each row is a spectrum.
+
+      template (1d-array): template spectrum against which to cross correlate the data
+
+      normalizeXCM (bool): whether or not to normalize the cross correlation functions according to Zucker 2003
+
+      xcorMode (string): Mode of cross correlation, passed to scipy.signal.correlate.
+                Options:
+                  same
+                    The output is the same size as each spectra in data, centered with respect to the ‘full’ output.
+                    (Default)
+
+                  full
+                    The output is the full discrete linear cross-correlation of the inputs.
+
+                  valid
+                    The output consists only of those elements that do not rely on the zero-padding. In ‘valid’ mode, either each spectra in data or template must be at least as large as the other in every dimension.
+      verbose (bool): Creates progress bar if true
+
+    Returns:
+      xcm (2d-array): matrix where each row is the corresponding row of data cross correlated against template
+  '''
+  # Remove mean from cross-correlation inputs
+  template = template - np.mean(template)
+  data     = data     - np.mean(data,1)[:,np.newaxis]
+
+  seq = data
+  if verbose:
+    seq = tqdm(seq, desc='Cross Correlating')
+
+  xcm = []
+  for spec in seq:
+    xcor = signal.correlate(spec, template, xcorMode)
+
+    if normalize:
+      n = len(spec)
+      #Perscription in Zucker 2003
+      xcor = xcor / (n*np.std(spec)*np.std(template))
+
+    xcm.append(xcor)
+
+  return np.array(xcm)
+
+def alignXCM(xcm, xcorVels, velocityOffsets,
+              isInterpolatedXCM=False, ext=1
+):
+  '''
+    Shifts each cross correlation function in xcm according to a velocity offset in (velocityOffsets)
+
+    Parameters:
+      xcm (2d-array): Matrix where each row is a cross correlation function (CCF)
+
+      xcorVels (1d-array): velocity axis for each CCF
+
+      velocityOffsets (1d-array): velocity offset for each individual CCF.
+        Length must be equal to the length of xcm (number of CCFs in xcm)
+
+      isInterpolatedXCM (bool): Allows one to set xcm as the output of interpolate.splrep(xcorVels, xcm)
+        Usefull for faster computation if run many times.
+
+      ext (int): Controls the value returned for elements of x not in the interval defined by the knot sequence.
+          if ext=0, return the extrapolated value.
+          if ext=1, return 0
+          if ext=2, raise a ValueError
+          if ext=3, return the boundary value.
+    Returns:
+      alignedXCM (2d-array): the input xcm with each CCF shifted by a velocity offset
+  '''
+
+  # If not already interpolated, make interpolation matrix
+  if not isInterpolatedXCM:
+    xcm = [interpolate.splrep(xcorVels, xcor) for xcor in xcm]
+
+  # Assemble the modified velocities
+  adjustedVelocities = [xcorVels + velocityOffset for velocityOffset in velocityOffsets]
+
+  # Align the xcm according to the new velocities
+  alignedXCM = [interpolate.splev(adjustedVelocities[i], xcm[i], ext=ext) for i in range(len(xcm))]
+
+  return np.array(alignedXCM)
+###
