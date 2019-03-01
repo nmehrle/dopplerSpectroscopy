@@ -586,4 +586,12 @@ class hrsObs:
 
     self.data = data
     self.log.append('Sysrem: '+str(nCycles)+' cycles')
+
+  def varianceWeight(self):
+    '''
+      Weights each column of data by its variance
+    '''
+
+    self.data = hru.varianceWeighting(self.data)
+    self.log.append('Variance Weigthed')
   ###
