@@ -2,7 +2,7 @@ import pickle
 import numpy as np
 
 from scipy import ndimage as ndi
-from scipy import optimize, interpolate
+from scipy import constants, optimize, interpolate
 
 from astropy.io import fits
 from astropy.time import Time
@@ -355,23 +355,75 @@ def getBarycentricCorrection(times, starname, obsname, verbose=False, **kwargs):
   bc = -bc 
   return bc
 
-def doppler(wave,v, source=False):
-  # v in m/s
-  # source = False: wave is observed wavelengths
-  # source = True: wave is source wavelengths
-  beta = v/constants.c
-  if source:
-    xsq = (1+beta)/(1-beta)
-  else:
-    xsq = (1-beta)/(1+beta)
-  return np.sqrt(xsq)*wave
+def doppler(wave, v, wavelengthFrame='observed', unitPrefix=1):
+  '''
+    Calculates the doppler shift of a wavelength or array of wavelengths given a relative velocity.
 
-def inverseDoppler(wave, wave_shift, source=False):
-  waveCenter = np.median(wave)
-  
-  z = wave_shift/ (waveCenter - wave_shift)
-  if source:
-    z = wave_shift/ (waveCenter)
-  A = (1+z)**2
-  return (A-1)/(A+1) * constants.c
-###
+    Wavelength can be entered as either the observed wavelengths, or the source wavelengths.
+    Default is observed. If wavelengths are the source wavelength, enter wavelengthFrame='Source'
+
+    Returns Sqrt[(1-beta)/(1+beta)] * wave for observed frame
+            Sqrt[(1+beta)/(1-beta)] * wave for source frame
+
+    Parameters:
+      wave (float or array): wavelengths to calculate doppler shift of
+
+      v (float): velocity of source relative to observer
+
+      wavelengthFrame (optional): whether the wavelengths are given as the observed wavelengths, or the source wavelengths.
+        Options:
+          'observed': Wavelengths are observed wavelengths
+          'source'  : Wavelengths are source frame wavelengths
+
+      unitPrefix (float): Units of velocity divided by meter/second. 
+        i.e. unitPrefix = 1000 implies velocity is in km/s
+             unitPrefix = (1000 / 86400) implies velocity is km/day
+    Returns:
+      correctedWavelengths (float or array): The wavelengths seen in the other frame
+  '''
+  # Get speed of light in correct units
+  c = constants.c / unitPrefix
+
+  # Adjust for wavelengthFrame
+  # Note that entering observed wavelengths is the same as entering source wavelengths by with 
+  # the relative velocity opposite.
+  if wavelengthFrame == 'source':
+    v = v
+  elif wavelengthFrame == 'observed':
+    v = -v
+  else:
+    raise ValueError('wavelengthFrame must be either "observed" or "source".')
+
+  # Calculate relative difference
+  beta = v/c
+  xsq = (1+beta)/(1-beta)
+  correctedWavelengths = np.sqrt(xsq)*wave
+
+  return correctedWavelengths
+
+def inverseDoppler(observedWave, sourceWave, unitPrefix=1):
+  '''
+    Given observed and source wavelengths, calculates the relative velocity between the two
+
+    Uses 1+z = wave_obs/wave_source = Sqrt[(1+beta)/(1-beta)]
+
+    Parameters:
+      observedWave (float or array): Wavelength in observers frame
+
+      sourceWave (float or array): Wavelength in source frame
+
+      unitPrefix (float): Units of velocity divided by meter/second. 
+        i.e. unitPrefix = 1000 implies velocity is in km/s
+             unitPrefix = (1000 / 86400) implies velocity is km/day
+    Returns:
+      v (float or array): Veloctiy of source relative to observer (positive = receding)
+  '''
+  # A = (1+z)^2
+  A = (observedWave/sourceWave)**2
+  beta = (A - 1)/(A + 1)
+
+  # calculate c in correct units
+  c = constants.c / unitPrefix
+  v = beta * c
+
+  return v
