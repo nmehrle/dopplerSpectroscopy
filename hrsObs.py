@@ -543,7 +543,7 @@ class hrsObs:
                                 absoluteCutoff=absoluteCutoff, smoothingFactor=0,
                                 plotResult=plotResult)
 
-    mask = combineMasks(time_mask, wave_mask, smoothingFactor=smoothingFactor)
+    mask = hru.combineMasks(time_mask, wave_mask, smoothingFactor=smoothingFactor)
 
     if plotResult:
       plt.figure()
@@ -555,6 +555,8 @@ class hrsObs:
       plt.title('Full Mask')
       plt.ylabel('Normalized Flux')
       plt.xlabel('Wavelength')
+
+    self.log.append('Mask Created')
 
     self.mask = mask
 
@@ -582,7 +584,7 @@ class hrsObs:
         verbose (bool): Print Sysrem progress updates
     '''
 
-    data = sysrem(self.data, self.error, verbose=verbose, returnAll=False)
+    data = hru.sysrem(self.data, self.error, verbose=verbose, returnAll=False)
 
     self.data = data
     self.log.append('Sysrem: '+str(nCycles)+' cycles')
