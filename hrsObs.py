@@ -337,7 +337,7 @@ class hrsObs:
 
     #set current data and keep track of order of operations
     self.data = self.rawFlux.copy()
-    self.dataStage = ['Raw Data']
+    self.log = ['Raw Data']
   ###
 
   #-- Processing Data
@@ -346,7 +346,7 @@ class hrsObs:
     All require raw data having been collected as per collectRawData()
   '''
 
-  def trimData(self, doAutoTrimCols = False, showPlots=False, **kwargs):
+  def trimData(self, doAutoTrimCols = False, plotResult=False, **kwargs):
     '''
       Runs highResUtils.trimData() on this observation. 
       Trims datasets according to rowCuts,colCuts and autoColTrimming
@@ -354,7 +354,7 @@ class hrsObs:
       Parameters:
         doAutoTrimCols (bool): Whether or not to automatically trim columns
 
-        showPlots (bool): shows trimming plots
+        plotResult (bool): shows trimming plots
 
         **kwargs:
           entries should be:
@@ -400,7 +400,7 @@ class hrsObs:
     data, applyRowCuts, applyColCuts, applyBothCuts = hru.trimData(self.data, 
                                           applyRowCuts, applyColCuts, applyBothCuts,
                                           rowCuts, colCuts, doAutoTrimCols,
-                                          showPlots=showPlots,
+                                          plotResult=plotResult,
                                           figTile=figTile,
                                           **kwargs) 
 
@@ -411,7 +411,7 @@ class hrsObs:
     self.wavelengths           = applyColCuts[0]
     self.error                 = applyBothCuts[0]
 
-    self.dataStage.append('Trimmed')
+    self.log.append('Trimmed')
 
   def getAlignmentOffset(self, padLen=None, peak_half_width=3,
                         upSampleFactor=1000, verbose=False
@@ -432,9 +432,8 @@ class hrsObs:
     '''
 
     highSNR   = hru.getHighestSNR(self.data, self.error)
-    reference = self.data[highSNR].copy()
 
-    offsets = hru.alignment(self.data, reference,
+    offsets = hru.alignment(self.data, self.data[highSNR],
                         returnOffset=True, padLen=padLen,
                         peak_half_width=peak_half_width,
                         upSampleFactor=upSampleFactor,
@@ -461,9 +460,9 @@ class hrsObs:
     '''
 
     highSNR   = hru.getHighestSNR(self.data, self.error)
-    reference = self.data[highSNR].copy()
 
-    data, error = hru.alignment(self.data, reference, iterations=iterations,
+    data, error = hru.alignment(self.data, self.data[highSNR],
+                        iterations=iterations,
                         error=self.error, padLen=padLen,
                         peak_half_width=peak_half_width,
                         upSampleFactor=upSampleFactor,
@@ -472,6 +471,119 @@ class hrsObs:
     self.data = data
     self.error = error
 
-    self.dataStage.append('Aligned')
-  ###
+    self.log.append('Aligned')
 
+  def normalizeData(self, normalizationScheme='divide_row', polyOrder=2):
+    '''
+      Apply a given normalizationScheme to the data.
+
+      Options are:
+        'subtract_col': subtract the mean column from each column
+        'subtract_row': subtract the mean row (spectrum) from each spectra
+        'subtract_all': apply both 'subtract_col' and 'subtract_row'
+        'divide_col': divide data by mean column
+        'divide_row': divide data by mean spectrum
+        'divide_all': apply both 'divide_col' and 'divide_row'
+        'polynomial': subtract a best fit polynomial of order 'polyOrder'
+    '''
+    data = self.data.copy()
+
+    if normalizationScheme == 'subtract_col':
+      data = data-np.mean(data,1)[:,np.newaxis]
+    elif normalizationScheme == 'subtract_row':
+      data = data-np.mean(data,0)
+    elif normalizationScheme == 'subtract_all':
+      data = data-np.mean(data,0)
+      data = data-np.mean(data,1)[:,np.newaxis]
+    elif normalizationScheme == 'divide_col':
+      data = data / np.mean(data,1)[:,np.newaxis]
+    elif normalizationScheme == 'divide_row':
+      data = data / np.mean(data,0)
+    elif normalizationScheme == 'divide_all':
+      data = data / (np.mean(data,0) * np.mean(data,1)[:,np.newaxis])
+    elif normalizationScheme == 'continuum':
+      data = polynomialSubtract(data, polyOrder)
+    else:
+      raise(KeyError('Normalization Keyword '+normalizationScheme+' invalid. Valid KWs are a combination of "subtract, divide" and "row, col, all" e.g. "subtract_row". Or "continuum", with a valid Continuum Order'))
+
+    self.data = data
+    self.log.append('Normalized: '+normalizationScheme)
+
+  def generateMask(self, use_time_mask=True, use_wave_mask=False, plotResult=False,
+                   relativeCutoff=3, absoluteCutoff=0, smoothingFactor=20, windowSize=25
+  ):
+    '''
+      Generates a wavelength mask to apply to the data. Calls highResUtils.getTimeMask and highResUtils.getWaveMask to generate masks and combines them.
+
+      Result saved as self.mask
+
+      Parameters:
+        use_time_mask (bool): Whether or not to generate a mask from hru.getTimeMask
+
+        use_wave_mask (bool): Whether or not to generate a mask from hru.getWaveMask
+
+        windowSize (int): Size of region around each wavelength column to consider for calculating SNR for waveMask
+
+        relativeCutoff (positive float): Mask columns with SNR this sigma below the mean SNR
+
+        absoluteCutoff (float): Mask columns with SNR below this value
+
+        smoothingFactor (int): Number of columns around a masked column to also mask when combining
+
+        plotResult(bool): plot each mask generated and the full mask
+    '''
+    time_mask = np.ones(np.shape(self.data)[1])
+    wave_mask = np.ones(np.shape(self.data)[1])
+
+    if use_time_mask:
+      time_mask = hru.getTimeMask(self.data, relativeCutoff=relativeCutoff, absoluteCutoff=absoluteCutoff,
+                                smoothingFactor=0, plotResult=plotResult)
+    if use_wave_mask:
+      wave_mask = hru.getWaveMask(self.data, windowSize=windowSize, relativeCutoff=relativeCutoff,
+                                absoluteCutoff=absoluteCutoff, smoothingFactor=0,
+                                plotResult=plotResult)
+
+    mask = combineMasks(time_mask, wave_mask, smoothingFactor=smoothingFactor)
+
+    if plotResult:
+      plt.figure()
+
+      plt.plot(self.wavelengths, normalize(np.median(self.data,0)))
+      plt.plot(mask)
+      plt.ylim(-0.2,1.2)
+
+      plt.title('Full Mask')
+      plt.ylabel('Normalized Flux')
+      plt.xlabel('Wavelength')
+
+    self.mask = mask
+
+  def applyMask(self):
+    '''
+      Applys mask to data.
+
+      Mask should be created by calling generateMask(). If no mask has been created, will throw an error.
+    '''
+    try:
+      data = hru.applyMask(self.data, self.mask)
+    except AttributeError:
+      raise AttributeError("A mask must be first created by calling generateMask() on this object.")
+
+    self.data = data
+    self.log.append('Masked')
+
+  def sysrem(self, nCycles=1, verbose=False):
+    '''
+      Applies the Sysrem de-trending algorithm on this data.
+
+      Parameters:
+        nCycles (int): Number of times to run Sysrem
+
+        verbose (bool): Print Sysrem progress updates
+    '''
+
+    data = sysrem(self.data, self.error, verbose=verbose, returnAll=False)
+
+    self.data = data
+    self.log.append('Sysrem: '+str(nCycles)+' cycles')
+  ###

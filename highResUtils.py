@@ -536,7 +536,8 @@ def getTimeMask(flux, relativeCutoff=3, absoluteCutoff=0,
       absoluteCutoff (float): Mask columns with SNR below this value
 
       smoothingFactor (int): Number of columns around a masked column to also mask
-
+      
+      plotResult (bool): If true, plots the mask versus column SNRS
     Returns:
       mask (1d-array): Boolean array of 1's for good columns, 0's for bad columns
   '''
@@ -614,7 +615,8 @@ def getWaveMask(flux, windowSize=25, relativeCutoff=3,
       absoluteCutoff (float): Mask columns with SNR below this value
 
       smoothingFactor (int): Number of columns around a masked column to also mask
-
+      
+      plotResult (bool): If true, plots the mask versus calculated SNRS
     Returns:
       mask (1d-array): Boolean array of 1's for good columns, 0's for bad columns
   '''
@@ -713,7 +715,7 @@ def sysrem(data, error, ncycles=1,
            maxIterations=200,
            maxError=0.001,
            verbose=False,
-           returnAll=True
+           returnAll=False
 ):
   '''
     Implementation of the Sysrem de-trending algorithm from (Tamuz+ 2005). See also (Mazeh+ 2007). Removes systematic effects from many lightcurves. A variant of PCA with non-equal errors.
@@ -937,4 +939,6 @@ def alignXCM(xcm, xcorVels, velocityOffsets,
   alignedXCM = [interpolate.splev(adjustedVelocities[i], xcm[i], ext=ext) for i in range(len(xcm))]
 
   return np.array(alignedXCM)
+
+
 ###
