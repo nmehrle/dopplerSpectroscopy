@@ -26,11 +26,14 @@
         },
         "dates": {
           "2016oct15b": {
-            "dateLevelKeywords": {},
+            "dateLevelKeywords": {
+            },
             "orders": {}
           },
           "2016oct19": {
-            "dateLevelKeywords": {},
+            "dateLevelKeywords": {
+              "rowCuts": [95,94,0]
+            },
             "orders": {}
           },
           "2016oct20b": {
