@@ -1010,4 +1010,65 @@ def addMatricies(matricies, xAxes, outputXAxis):
   # Sum together the matricies
   summed = np.sum(summed,0)
   return summed
+
+def generateSigMat(xcm, kpRange, wavelengths, times, orbParams,
+                   barycentricCorrection, 
+                   unitPrefix=1, verbose=False
+):
+  '''
+    Generates a significanceMatrix sigMat by aligning a cross correlation matrix to orbital solutions with
+    Kp in kpRange, and coadding each ccf in time.
+
+    Returns the un-nomralized sigMat
+
+    Parameters:
+      xcm (2d-array): Cross Correlation Matrix
+
+      kpRange (1d-array): List of Kp values to check when checking orbital solutions
+
+      wavelengths (1d-array): Wavelengths of data used to generate xcm
+
+      times (1d-array): Timestamps of spectra taken
+
+      orbParams (dict): dictionary containing the orbital solution (P, T_0, e, w_deg)
+
+      barycentricCorrection (1d-array): Barycentric velocities at the time of the observations
+
+      unitPrefix (float): Units of velocity divided by meter/second.
+        i.e. unitPrefix = 1000 implies velocity is in km/s
+             unitPrefix = (1000 / 86400) implies velocity is km/day
+
+      verbose (bool): whether or not to progressbar
+
+    Returns:
+      SigMat (2d-array): Array of added CCF values with axes of kpRange and systemicVelocity (determined by CCF velocities). Normalize to find significance values
+  '''
+  # Make sure orbital Parameters doesn't specity Kp, v_sys
+  unitOrbParams = orbParams.copy()
+  unitOrbParams['Kp'] = 1
+  unitOrbParams['v_sys'] = 0
+
+  # Calculate unitRVs (ie RV = Kp * unitRV)
+  unitRVs = getRV(times, **unitOrbParams)
+
+  # Convert XCM to spline representation for faster calculation
+  xcorInterps    = [interpolate.splrep(xcorVelocities, ccf) for ccf in xcm]
+
+  xcorVelocities = getCrossCorrelationVelocity(wavelengths, unitPrefix=unitPrefix)
+
+  seq = kpRange
+  if verbose:
+    seq = tqdm(seq, desc='Calculating KPs')
+
+  m = len(xcm)
+
+  sigMat = []
+  for kp in seq:
+    rvs = kp * unitRVs + barycentricCorrection/unitPrefix
+    alignedXCM = alignXCM(xcorInterps, xcorVelocities, rvs, isInterpolatedXCM=True)
+    sigMatRow = np.sum(alignedXCM,0)/m
+    sigMat.append(sigMatRow)
+
+  return np.array(sigMat)
+
 ###
