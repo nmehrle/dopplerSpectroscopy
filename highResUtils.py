@@ -320,7 +320,6 @@ def trimData(flux,
 
   if doAutoTrimCols:
     leftEdge, rightEdge = colTrimFunc(flux, plotResult=plotResult, ax=axs[1], **kwargs)
-
     flux = flux[...,leftEdge:rightEdge]
     if applyColCuts is not None:
       for i in range(len(applyColCuts)):
@@ -710,7 +709,7 @@ def applyMask(data, mask):
 
   return masked
 
-def sysrem(data, error, ncycles=1,
+def sysrem(data, error, nCycles=1,
            initialGuess=None,
            maxIterations=200,
            maxError=0.001,
@@ -729,7 +728,7 @@ def sysrem(data, error, ncycles=1,
           each column represents a wavelength channel and each row a spectrum
       error (2d-array): error on the values in data
 
-      ncycles (positive int): Number of cycles to run sysrem. Analogous to number of Prinicpal Components to
+      nCycles (positive int): Number of cycles to run sysrem. Analogous to number of Prinicpal Components to
           remove
 
       initalGuess (vector): Inital guess of trend to remove
@@ -773,7 +772,7 @@ def sysrem(data, error, ncycles=1,
   if verbose:
     print('Starting Sysrem')
 
-  for cycle in range(ncycles):
+  for cycle in range(nCycles):
     if verbose:
       print('Starting Cycle '+str(cycle+1),flush=True)
       pbar = tqdm(total=100, desc='Cycle '+str(cycle+1))
@@ -893,7 +892,7 @@ def generateXCM(data, template,
   for spec in seq:
     xcor = signal.correlate(spec, template, xcorMode)
 
-    if normalize:
+    if normalizeXCM:
       n = len(spec)
       #Perscription in Zucker 2003
       xcor = xcor / (n*np.std(spec)*np.std(template))
@@ -940,5 +939,74 @@ def alignXCM(xcm, xcorVels, velocityOffsets,
 
   return np.array(alignedXCM)
 
+def getCrossCorrelationVelocity(wavelengths, xcorMode='same', unitPrefix=1):
+  '''
+    Computes the velocity space values of the x-axis from a cross correlation. For use when two arrays over domain (wavelengths) are cross correlated. The resultant domain will be the pixelOffsets between the arrays, which this function converts to velocity space, given the wavelength representation.
 
+    Treats wavelenths as linear even if it isn't.
+
+    Retuns velocityOffsets such that a value of -10 km/s indicates source is moving towards observer at 10 km/s
+
+    Parameters:
+      wavelengths (1d array): Wavelength representation of the domain of the cross-correlated signals
+
+      xcorMode (str): The cross correlation mode as in signal.correlate()
+        Options:
+          "same"
+          "full"
+
+      unitPrefix (float): Units of velocity divided by meter/second.
+        i.e. unitPrefix = 1000 implies velocity is in km/s
+             unitPrefix = (1000 / 86400) implies velocity is km/day
+
+    Returns:
+      velocityOffsets (1d array): Velocity space representation of cross correlation signal offset
+  '''
+  n = len(wavelengths)
+  if xcorMode == 'same':
+    pixelOffsets = np.arange(-int(n/2),int((n+1)/2))
+  elif xcorMode == 'full':
+    pixelOffsets = np.arange(-(n-1), n)
+  else:
+    raise ValueError('xcorMode must be either "same" or "full".')
+
+  # use wavelengths-getSpacing(wavelengths) to get velocity relative to observer
+  velocityOffsets = pixelOffsets * inverseDoppler(wavelengths, wavelengths-getSpacing(wavelengths),
+                                      unitPrefix=unitPrefix)
+  return velocityOffsets
+
+def addMatricies(matricies, xAxes, outputXAxis):
+  '''
+    This function is used to add together a collection of matricies over different domains.
+    Each row of each matrix is interpolated onto the outputXAxis domain, the matricies are summed
+    to create 1 output matrix over outputXAxis domian.
+
+    Parameters:
+      matricies (3d - array): list of n (m x k_i) matricies. m must be constant, k can be unique to each one
+
+      xAxes (2d - array): List of n x-axes for each matrix in matricies. length must match 3rd dimension of matricies
+
+      outputXAxis (1d - array): X axes for summed matrix, length j
+
+    Returns:
+      summed (2d - array): m x j matrix created by summing together the input n matricies after interpolation
+  '''
+
+  summed = []
+  for i in range(len(matricies)):
+    mat = matricies[i]
+    x   = xAxes[i]
+
+    # Interpolate this matrix onto outputXAxis
+    interpolatedMat = []
+    for row in mat:
+      ip = interpolate.splrep(x, row)
+      interpolatedRow = interpolate.splev(outputXAxis, ip)
+      interpolatedMat.append(interpolatedRow)
+
+    summed.append(np.array(interpolatedMat))
+
+  # Sum together the matricies
+  summed = np.sum(summed,0)
+  return summed
 ###
