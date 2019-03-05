@@ -273,6 +273,33 @@ def polynomialSubtract(data, polynomialOrder, error=None):
 
   return np.array(result)
 
+def interpolateData(data, old_x, new_x, ext=3):
+  '''
+    Interpolates the data from domain old_x onto domain new_x
+
+    Parameters:
+      data (array): Data to be interpolated
+
+      old_x (array): domain over which data is specified
+
+      new_x (array): domain to interpolate data onto
+
+      ext (int):
+        Controls the value returned for elements of x not in the interval defined by the knot sequence.
+
+          if ext=0, return the extrapolated value.
+          if ext=1, return 0
+          if ext=2, raise a ValueError
+          if ext=3, return the boundary value.
+
+    Returns:
+      interpolated (array): data over domain new_x
+  '''
+
+  splineRep = interpolate.splrep(old_x, data)
+  interpolated = interpolate.splev(new_x, splineRep, ext=ext)
+  return interpolated
+
 def getSpacing(arr):
   return (arr[-1]-arr[0])/(len(arr)-1)
 
@@ -412,7 +439,7 @@ def inverseDoppler(observedWave, sourceWave, unitPrefix=1):
 
       sourceWave (float or array): Wavelength in source frame
 
-      unitPrefix (float): Units of velocity divided by meter/second. 
+      unitPrefix (float): Units of velocity divided by meter/second.
         i.e. unitPrefix = 1000 implies velocity is in km/s
              unitPrefix = (1000 / 86400) implies velocity is km/day
     Returns:
