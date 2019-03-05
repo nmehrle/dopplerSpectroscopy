@@ -939,7 +939,7 @@ def alignXCM(xcm, xcorVels, velocityOffsets,
 
   return np.array(alignedXCM)
 
-def getCrossCorrelationVelocity(wavelengths, xcorMode='same', unitPrefix=1):
+def getCrossCorrelationVelocity(wavelengths, unitPrefix=1, xcorMode='same'):
   '''
     Computes the velocity space values of the x-axis from a cross correlation. For use when two arrays over domain (wavelengths) are cross correlated. The resultant domain will be the pixelOffsets between the arrays, which this function converts to velocity space, given the wavelength representation.
 
@@ -950,14 +950,14 @@ def getCrossCorrelationVelocity(wavelengths, xcorMode='same', unitPrefix=1):
     Parameters:
       wavelengths (1d array): Wavelength representation of the domain of the cross-correlated signals
 
-      xcorMode (str): The cross correlation mode as in signal.correlate()
-        Options:
-          "same"
-          "full"
-
       unitPrefix (float): Units of velocity divided by meter/second.
         i.e. unitPrefix = 1000 implies velocity is in km/s
              unitPrefix = (1000 / 86400) implies velocity is km/day
+
+       xcorMode (str): The cross correlation mode as in signal.correlate()
+        Options:
+          "same"
+          "full"
 
     Returns:
       velocityOffsets (1d array): Velocity space representation of cross correlation signal offset
@@ -970,8 +970,9 @@ def getCrossCorrelationVelocity(wavelengths, xcorMode='same', unitPrefix=1):
   else:
     raise ValueError('xcorMode must be either "same" or "full".')
 
-  # use wavelengths-getSpacing(wavelengths) to get velocity relative to observer
-  velocityOffsets = pixelOffsets * inverseDoppler(wavelengths, wavelengths-getSpacing(wavelengths),
+  # Observed velocity is offseted velocity, so pass wavelengths+getSpacing(wavelengths) to inverseDoppler as 
+  # observedWavelength
+  velocityOffsets = pixelOffsets * inverseDoppler(wavelengths+getSpacing(wavelengths), wavelengths,
                                       unitPrefix=unitPrefix)
   return velocityOffsets
 
