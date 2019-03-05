@@ -127,6 +127,7 @@ class hrsObs:
   def template(self, value):
     if value is None:
       del self.template
+      del self.templateUnits
       return
       
 
@@ -139,6 +140,11 @@ class hrsObs:
         raise AttributeError('templateFiles not found for planet "'+str(self.planet)+'". Please check validity of database.')
     except KeyError:
       raise KeyError('Template "'+str(value)+'" not defined for planet "'+str(self.planet)+'".')
+
+    try:
+      self.templateUnits = self.allTemplateUnits[value]
+    except:
+      raise KeyError('Units not specified for template "' + str(value) + '". Please enter the value used to convert to microns into the database, i.e. if the template data is in angstroms, enter 10000.')
 
     try:
       self.templateData = readFile(templateFile)
@@ -154,6 +160,7 @@ class hrsObs:
     self._template = None
     try:
       del self.templateData
+      del self.templateUnits
     except AttributeError:
       pass
   ###
@@ -214,6 +221,8 @@ class hrsObs:
       self.orbParams         = database['orbitalParamters']
       self.starName          = database['starName']
       self.templateFiles     = database['templates']
+      self.allTemplateUnits  = database['templateUnits']
+
       self.templates         = list(database['templates'].keys())
       self.templates.remove('directory')
 
@@ -596,4 +605,8 @@ class hrsObs:
 
     self.data = hru.varianceWeighting(self.data)
     self.log.append('Variance Weigthed')
+  ###
+
+  #-- Comparing to Template
+
   ###

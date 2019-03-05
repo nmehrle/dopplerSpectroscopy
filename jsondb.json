@@ -13,6 +13,9 @@
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
       "default": "wasp33.pickle"
     },
+    "templateUnits": {
+      "default": 10000
+    },
     "instruments": {
       "aries": {
         "observatory": "MMT",
