@@ -584,7 +584,7 @@ class hrsObs:
         verbose (bool): Print Sysrem progress updates
     '''
 
-    data = hru.sysrem(self.data, self.error, verbose=verbose, returnAll=False)
+    data = hru.sysrem(self.data, self.error, nCycles=nCycles, verbose=verbose, returnAll=False)
 
     self.data = data
     self.log.append('Sysrem: '+str(nCycles)+' cycles')
