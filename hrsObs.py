@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy import ndimage as ndi
+from scipy import interpolate
 
 
 class hrsObs:
@@ -604,9 +605,297 @@ class hrsObs:
     '''
 
     self.data = hru.varianceWeighting(self.data)
-    self.log.append('Variance Weigthed')
+    self.log.append('Variance Weighted')
   ###
 
   #-- Comparing to Template
+  def generateXCM(self, normalizeXCM=True, unitPrefix=1000, xcorMode='same', verbose=False):
+    '''
+      Calculates the cross-correlation matrix for this observation.
 
+      Cross correlates the current stage of foo.data with the template.
+
+      Stores result as self.xcm,
+      Stores alos self.crossCorVels
+
+      Parameters:
+        normalizeXCM (bool): whether or not to normalize the cross correlation functions according to Zucker 2003
+
+        unitPrefix (float): Units of velocity divided by meter/second. (Velocity units of kpRange)
+        i.e. unitPrefix = 1000 implies velocity is in km/s
+             unitPrefix = (1000 / 86400) implies velocity is km/day
+
+        xcorMode (string): Mode of cross correlation, passed to scipy.signal.correlate.
+                  Options:
+                    same
+                      The output is the same size as each spectra in data, centered with respect to the ‘full’ output.
+                      (Default)
+
+                    full
+                      The output is the full discrete linear cross-correlation of the inputs.
+
+                    valid
+                      The output consists only of those elements that do not rely on the zero-padding. In ‘valid’ mode, either each spectra in data or template must be at least as large as the other in every dimension.
+        verbose (bool): Creates progress bar if true
+    '''
+    # Interpolate template onto detector wavelengths.
+    # If detector wavelength is not in template wavelengths, throw an error
+    templateWave = self.templateData['wavelengths']/self.templateUnits
+    templateFlux = self.templateData['flux']
+    interpolatedTemplate = interpolateData(templateFlux, templateWave, self.wavelengths, ext=2)
+
+    self.xcm = hru.generateXCM(self.data, interpolatedTemplate, normalizeXCM=normalizeXCM,
+                                xcorMode=xcorMode, verbose=verbose)
+    self.crossCorVels = hru.getCrossCorrelationVelocity(self.wavelengths, unitPrefix=unitPrefix)
+
+  def generateSigMat(self, kpRange, unitPrefix=1000, verbose=False):
+    '''
+      Generates a significance matrix for this observation. Will generate a CrossCorrelation matrix if it has not been set already, using the default parameters.
+
+      Stores result as self.sigMat
+      Also stores kpRange which is needed to plot sigMat
+
+      Parameters:
+        kpRange (1d-array): List of Kp values to attempt in aligning to orbital solutions.
+
+        unitPrefix (float): Units of velocity divided by meter/second. (Velocity units of kpRange)
+        i.e. unitPrefix = 1000 implies velocity is in km/s
+             unitPrefix = (1000 / 86400) implies velocity is km/day
+
+        verbose (bool): Whether or not to progressbar
+    '''
+    try:
+      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.times,
+                                  self.orbParams, self.barycentricCorrection,
+                                  unitPrefix=unitPrefix, verbose=verbose)
+    except AttributeError:
+      self.generateXCM()
+      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.times,
+                                  self.orbParams, self.barycentricCorrection,
+                                  unitPrefix=unitPrefix, verbose=verbose)
+
+    self.kpRange = kpRange
+    self.sigMat = sigMat
+  ###
+
+  #-- Plotting
+  def getNameString(self):
+    nameStr = str(self.planet) + ' - '
+    nameStr += str(self.instrument) + ' - '
+    nameStr += str(self.date) + ' - '
+    nameStr += 'Order: '+ str(self.order) + '\n'
+    return nameStr
+
+
+  def plotSigMat(self, xlim=[-100,100], ylim=None, clim=[None,None],
+                 figsize=None, cmap='viridis', title='', saveName=None,
+                 target_kp=None, target_vsys=None, unitStr='km/s'
+  ):
+    '''
+      Plots the significance matrix for this observation.
+      Requires self.generateSigMat() has been called
+    '''
+    windowed = self.sigMat
+    xs = self.crossCorVels
+    ys = self.kpRange
+
+    # Window sigMat to plotArea
+    # could just use xlim/ylim, but this makes it easier to find/mark the maxVal
+    if xlim is None:
+      xlim = [np.min(xs), np.max(xs)]
+    if ylim is None:
+      ylim = [np.min(ys), np.max(ys)]
+
+    left_cut  = np.argmin(np.abs(xs - xlim[0]))
+    right_cut = np.argmin(np.abs(xs - xlim[1]))
+    bot_cut   = np.argmin(np.abs(ys - ylim[0]))
+    top_cut   = np.argmin(np.abs(ys - ylim[1]))
+
+    windowed = windowed[bot_cut:top_cut+1, left_cut:right_cut+1]
+
+    # Window xs and ys
+    xs = xs[left_cut:right_cut+1]
+    ys = ys[bot_cut:top_cut+1]
+
+    # Offset by half spacing so pixels describe center not corner values
+    pltXs = xs - getSpacing(xs)/2
+    pltYs = ys - getSpacing(ys)/2
+
+    # Plot sigMat
+    plt.figure(figsize=figsize)
+    plt.pcolormesh(pltXs, pltYs, windowed, cmap=cmap, vmin=clim[0], vmax=clim[1])
+    cbar = plt.colorbar()
+
+    # Calculate and mark max value
+    maxIndex = np.unravel_index(windowed.argmax(), windowed.shape)
+    maxX = xs[maxIndex[1]]
+    maxY = ys[maxIndex[0]]
+    plt.scatter(maxX, maxY, color='k', marker='P',s=50)
+    highValStr = 'Max Value: ' + str(np.round(windowed[maxIndex],2)) + \
+                 ': (' + str(np.round(maxX,1)) + ',' + \
+                 str(int(np.round(maxY,0))) + ')'
+
+    # Attempt to use self.orbParams if no target values are given
+    if target_kp is None:
+      try:
+        target_kp = self.orbParams['Kp']
+      except AttributeError:
+        pass
+
+    if target_vsys is None:
+      try:
+        target_vsys = self.orbParams['v_sys']
+      except AttributeError:
+        pass
+
+    # Draw lines over target params
+    if target_kp is not None:
+      plt.plot((pltXs[0],pltXs[-1]),(target_kp,target_kp),'r--')
+    if target_vsys is not None:
+      plt.plot((target_vsys,target_vsys),(pltYs[0],pltYs[-1]),'r--')
+
+    # If both targets are specified, get the marked value
+    if target_kp is not None and target_vsys is not None:
+      markYval = np.argmin(np.abs(ys - target_kp))
+      markXval = np.argmin(np.abs(xs - target_vsys))
+
+      target_str = "\nTarget Value: " + str(np.round(windowed[markYval,markXval],2))
+
+    # apply limits so theres no extra grey border
+    plt.xlim(np.min(pltXs),np.max(pltXs))
+    plt.ylim(np.min(pltYs),np.max(pltYs))
+
+    plt.xlabel('Systemic Velocity ('+str(unitStr)+')')
+    plt.ylabel('Kp ('+str(unitStr)+')')
+    cbar.set_label('Sigma')
+
+    # format title
+    if title!='':
+      title+='\n'
+    plt.title(self.getNameString() + title + highValStr + target_str)
+
+    # Change mouseover events on jupyter to also show Z values
+    def fmt(x, y):
+      col = np.argmin(np.abs(xs-x))
+      row = np.argmin(np.abs(ys-y))
+      z = windowed[row,col]
+      return 'x=%1.1f, y=%1.1f, z=%1.2f' % (x, y, z)
+    plt.gca().format_coord = fmt
+
+    plt.tight_layout()
+
+    if saveName is not None:
+      plt.savefig(saveName)
+
+    plt.show()
+
+  def plotData(self, yscale='frame', cmap='viridis', clim=[None,None],
+               figsize=None, saveName=None, wavelengthUnits='microns',
+               title=''
+  ):
+    '''
+      Plots the current stage of self.data()
+      Includes self.log in the title
+    '''
+    if yscale == 'frame':
+      ys = np.arange(len(self.data))
+      ylabel = 'Frame'
+    elif yscale == 'time':
+      ys = self.times
+      ymin = np.min(ys)
+      minDay = ymin - ymin%1
+      ys = ys - minDay
+      ylabel = 'Time (JD - '+str(minDay)+')'
+    else:
+      raise ValueError('yscale must be either "frame" or "time".')
+
+    plt.figure(figsize=figsize)
+    plt.pcolormesh(self.wavelengths, ys, self.data, cmap=cmap, vmin=clim[0], vmax=clim[1])
+    cbar = plt.colorbar()
+
+    plt.axis('tight')
+
+    processStr = 'Data Process: '
+    for i, entry in enumerate(self.log):
+      if i%3 == 0:
+        processStr+='\n'
+
+      processStr += entry
+
+      if i != len(self.log)-1:
+        processStr += ' --> '
+
+    if title != '':
+      title += '\n'
+
+    plt.title(self.getNameString() + title + processStr)
+    plt.xlabel('Wavelength ('+str(wavelengthUnits)+')')
+    plt.ylabel(ylabel)
+
+    plt.tight_layout()
+
+    if saveName is not None:
+      plt.savefig(saveName)
+
+    plt.show()
+
+  def plotXCM(self, yscale='frame', alignmentKp=None, unitPrefix=1000,
+              xlim=None, cmap='viridis', clim=[None,None], title='',
+              figsize=None, saveName=None, velocityUnits='km/s'
+  ):
+    '''
+      Plots Cross Correlation matrix for this observation.
+      If alignmentKp is specified, aligns the xcm to that value
+    '''
+    if yscale == 'frame':
+      ys = np.arange(len(self.data))
+      ylabel = 'Frame'
+    elif yscale == 'time':
+      ys = self.times
+      ymin = np.min(ys)
+      minDay = ymin - ymin%1
+      ys = ys - minDay
+      ylabel = 'Time (JD - '+str(minDay)+')'
+    else:
+      raise ValueError('yscale must be either "frame" or "time".')
+
+    xcm = self.xcm.copy()
+    alignmentStr = ''
+    if alignmentKp is not None:
+      unitOrbParams = self.orbParams.copy()
+      unitOrbParams['Kp'] = 1
+      unitOrbParams['v_sys'] = 0
+
+      # Calculate unitRVs (ie RV = Kp * unitRV)
+      unitRVs = getRV(self.times, **unitOrbParams)
+      rv = alignmentKp * unitRVs + self.barycentricCorrection/unitPrefix
+      xcm = hru.alignXCM(xcm, self.crossCorVels, rv, isInterpolatedXCM=False)
+      alignmentStr = 'Aligned to Kp='+str(alignmentKp)+' '+str(velocityUnits)+'.'
+
+    # plot xcm
+    plt.figure(figsize=figsize)
+    plt.pcolormesh(self.crossCorVels, ys, xcm, cmap=cmap, vmin=clim[0], vmax=clim[1])
+    cbar = plt.colorbar()
+
+    # limit Axes
+    if xlim is not None:
+      plt.xlim(*xlim)
+    else:
+      plt.xlim(np.min(self.crossCorVels),np.max(self.crossCorVels))
+    plt.ylim(np.min(ys),np.max(ys))
+
+    # label
+    plt.xlabel('Cross Correlation Offset ('+str(velocityUnits)+')')
+    plt.ylabel(ylabel)
+
+    if title != '':
+      title = title+'\n'
+    plt.title(self.getNameString() + title + alignmentStr)
+
+    plt.tight_layout()
+
+    if saveName is not None:
+      plt.savefig(saveName)
+
+    plt.show()
   ###
