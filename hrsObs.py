@@ -677,7 +677,7 @@ class hrsObs:
     '''
       Generates a significance matrix for this observation. Will generate a CrossCorrelation matrix if it has not been set already, using the default parameters.
 
-      Stores result as self.sigMat
+      Stores result as self.sigMat, and as self.unNormedSigMat
       Also stores kpRange which is needed to plot sigMat
 
       Parameters:
@@ -701,9 +701,39 @@ class hrsObs:
 
     self.kpRange = kpRange
     self.sigMat = sigMat
+    self.unNormedSigMat = sigMat.copy()
 
-  def normalizeSigMat(self):
-    return 1
+  def reNormalizeSigMat(self, rowByRow=False, byPercentiles=False):
+    '''
+      Normalizes the significance matrix so each value represents a sigma rather than an arbitrary value.
+      Divides the values in sigMat by the standard deviation of sigmat
+
+      applies normalization to self.unNormedSigMat
+      saves result as self.sigMat
+
+      Parameters:
+        rowByRow (bool): whether to normalize by the standard deviation of each row (rowByRow = True)
+                         or the whole matrix (rowByRow = False)
+
+        byPercentiles (bool): whether to normalize by the actual standard deviation (byPercentiles = False)
+                              or by the 16th-84th percentiles (i.e. encompasing 68% of the data)
+                                (byPercentiles=True)
+    '''
+    sigMat = self.unNormedSigMat.copy()
+
+    if rowByRow:
+      if byPercentiles:
+        sigMat = sigMat / np.apply_along_axis(percStd, 1, sigMat)[:,np.newaxis]
+      else:
+        sigMat = sigMat / np.apply_along_axis(np.std, 1, sigMat)[:,np.newaxis]
+
+    else:
+      if byPercentiles:
+        sigMat = sigMat / percStd(sigMat)
+      else:
+        sigMat = sigMat / np.std(sigMat)
+
+    self.sigMat = sigMat
   ###
 
   #-- Plotting
