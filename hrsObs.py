@@ -166,7 +166,32 @@ class hrsObs:
       pass
   ###
 
-  #-- Initializing 
+  #-- Initializing
+  def copy(self):
+    '''
+      Method to copy this object by value into a new object. Returns the copy.
+
+      Copys by value so affecting one does not affect the other.
+    '''
+    # initialize copy object
+    theCopy = hrsObs(self.dbPath, self.planet, self.instrument, self.date, self.order, self.template)
+
+    # List of kws to ignore in copying over
+    ignore = ['dbPath', '_planet', '_instrument', '_date', '_order', '_template']
+
+    for k,v in self.__dict__.items():
+      if k in ignore:
+        continue
+
+      # Try and make value copies of each attribute in self
+      # When unable (e.g. for a string attribute) calling .copy() is unneccessary
+      try:
+        setattr(theCopy, k, v.copy())
+      except AttributeError:
+        setattr(theCopy, k, v)
+
+    return theCopy
+
   def initializeDatabase(self):
     '''
       Loads in values from database. Data loaded in is used to specify allowed values of attributes, and describes where to find actual data/ how to analyze it.
@@ -676,6 +701,9 @@ class hrsObs:
 
     self.kpRange = kpRange
     self.sigMat = sigMat
+
+  def normalizeSigMat(self):
+    return 1
   ###
 
   #-- Plotting
@@ -898,4 +926,48 @@ class hrsObs:
       plt.savefig(saveName)
 
     plt.show()
+  ###
+
+  #-- Convenience Functions
+  def prepareData(self,
+                  # TrimData
+                  doAutoTrimCols=False, plotTrim=False,
+                  #alignData
+                  alignmentIterations=1, alignmentPadLen=None,
+                  alignmentPeakHalfWidth=3, alignmentUpSampFactor=1000,
+                  #normalize
+                  normalizationScheme='divide_row',polyOrder=2,
+                  #generateMask
+                  use_time_mask=True, use_wave_mask=False,
+                  plotMasks=False, maskRelativeCutoff=3,
+                  maskAbsoluteCutoff=0, maskSmoothingFactor=20,
+                  maskWindowSize=25,
+                  # sysrem
+                  sysremIterations=1,
+                  verbose=False,
+                  **kwargs
+  ):
+    '''
+      Performs the standard data preperation.
+      Use this before calling self.generateXCM().
+    '''
+
+    self.trimData(doAutoTrimCols=doAutoTrimCols, plotResult=plotTrim, **kwargs)
+    self.alignData(iterations=alignmentIterations, padLen=alignmentPadLen,
+                   peak_half_width=alignmentPeakHalfWidth, upSampleFactor=alignmentUpSampFactor,
+                   verbose=verbose)
+
+    self.generateMask(use_time_mask=use_time_mask, use_wave_mask=use_wave_mask, plotResult=plotMasks,
+                      relativeCutoff=maskRelativeCutoff, absoluteCutoff=maskAbsoluteCutoff,
+                      smoothingFactor=maskSmoothingFactor, windowSize=maskWindowSize)
+
+    self.normalizeData(normalizationScheme=normalizationScheme, polyOrder=polyOrder)
+
+    self.applyMask()
+
+    self.sysrem(nCycles=sysremIterations, verbose=verbose)
+
+    self.varianceWeight()
+
+    self.applyMask()
   ###
