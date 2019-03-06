@@ -519,6 +519,39 @@ def alignment(flux, ref, iterations = 1,
                     error=shifted_error, padLen=padLen, peak_half_width=peak_half_width,
                     upSampleFactor=upSampleFactor, verbose=verbose)
 
+def normalizeData(data, normalizationScheme='divide_row', polyOrder=2):
+  '''
+    Apply a given normalizationScheme to the data.
+
+    Options are:
+      'subtract_col': subtract the mean column from each column
+      'subtract_row': subtract the mean row (spectrum) from each spectra
+      'subtract_all': apply both 'subtract_col' and 'subtract_row'
+      'divide_col': divide data by mean column
+      'divide_row': divide data by mean spectrum
+      'divide_all': apply both 'divide_col' and 'divide_row'
+      'polynomial': subtract a best fit polynomial of order 'polyOrder'
+  '''
+  if normalizationScheme == 'subtract_col':
+    data = data-np.mean(data,1)[:,np.newaxis]
+  elif normalizationScheme == 'subtract_row':
+    data = data-np.mean(data,0)
+  elif normalizationScheme == 'subtract_all':
+    data = data-np.mean(data,0)
+    data = data-np.mean(data,1)[:,np.newaxis]
+  elif normalizationScheme == 'divide_col':
+    data = data / np.mean(data,1)[:,np.newaxis]
+  elif normalizationScheme == 'divide_row':
+    data = data / np.mean(data,0)
+  elif normalizationScheme == 'divide_all':
+    data = data / (np.mean(data,0) * np.mean(data,1)[:,np.newaxis])
+  elif normalizationScheme == 'continuum':
+    data = polynomialSubtract(data, polyOrder)
+  else:
+    raise(KeyError('Normalization Keyword '+normalizationScheme+' invalid. Valid KWs are a combination of "subtract, divide" and "row, col, all" e.g. "subtract_row". Or "continuum", with a valid Continuum Order'))
+
+  return data
+
 def getTimeMask(flux, relativeCutoff=3, absoluteCutoff=0,
                 smoothingFactor=0, plotResult=False
 ):

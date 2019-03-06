@@ -521,25 +521,7 @@ class hrsObs:
         'divide_all': apply both 'divide_col' and 'divide_row'
         'polynomial': subtract a best fit polynomial of order 'polyOrder'
     '''
-    data = self.data.copy()
-
-    if normalizationScheme == 'subtract_col':
-      data = data-np.mean(data,1)[:,np.newaxis]
-    elif normalizationScheme == 'subtract_row':
-      data = data-np.mean(data,0)
-    elif normalizationScheme == 'subtract_all':
-      data = data-np.mean(data,0)
-      data = data-np.mean(data,1)[:,np.newaxis]
-    elif normalizationScheme == 'divide_col':
-      data = data / np.mean(data,1)[:,np.newaxis]
-    elif normalizationScheme == 'divide_row':
-      data = data / np.mean(data,0)
-    elif normalizationScheme == 'divide_all':
-      data = data / (np.mean(data,0) * np.mean(data,1)[:,np.newaxis])
-    elif normalizationScheme == 'continuum':
-      data = polynomialSubtract(data, polyOrder)
-    else:
-      raise(KeyError('Normalization Keyword '+normalizationScheme+' invalid. Valid KWs are a combination of "subtract, divide" and "row, col, all" e.g. "subtract_row". Or "continuum", with a valid Continuum Order'))
+    data = hru.normalizeData(self.data, normalizationScheme=normalizationScheme, polyOrder=polyOrder)
 
     self.data = data
     self.log.append('Normalized: '+normalizationScheme)
