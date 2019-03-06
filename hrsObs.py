@@ -375,6 +375,55 @@ class hrsObs:
     self.log = ['Raw Data']
   ###
 
+  #-- Get features of data
+  def getAlignmentOffset(self, padLen=None, peak_half_width=3,
+                        upSampleFactor=1000, verbose=False
+  ):
+    '''
+      Caclulates the alignment offset of each spectrum and the spectrum with the highest SNR. Returns that offset. 
+
+      Meant to be called on raw/trimmed data
+
+      Parameters:
+        padLen (int): amount of zeros to pad to array before fft
+
+        peak_half_width (int): number of points to include in a region around the xcor peak when upsampling
+
+        upSampleFactor (int): factor by which to upsample the data when interpolating. Limits the precision 
+            of the returned centers (i.e. an upSampleFactor of 10 can find peaks to a 0.1 precision level)
+
+      Returns:
+        offsets (1d-array): Wavelength offsets of each spectrum in pixel terms
+    '''
+
+    highSNR   = hru.getHighestSNR(self.data, self.error)
+
+    offsets = hru.alignment(self.data, self.data[highSNR],
+                        returnOffset=True, padLen=padLen,
+                        peak_half_width=peak_half_width,
+                        upSampleFactor=upSampleFactor,
+                        verbose=verbose)
+
+    return offsets
+
+  def getRVs(self, unitRVs=False):
+    '''
+      Returns the RVs for this observation. Option to have unit RVs (i.e. set Kp=1, vsys=0)
+
+      Parameters:
+        unitRVs (bool): Whether or not RVs returned are unit.
+      Returns:
+        rvs (array): Array of radial velocity values
+    '''
+    orbParams = self.orbParams
+    if unitRVs:
+      orbParams = self.orbParams.copy()
+      orbParams['Kp'] = 1
+      orbParams['v_sys'] = 0
+
+    rvs = getRV(self.times, **orbParams)
+    return rvs
+  ###
   #-- Processing Data
   '''
     These functions are for processing the raw data.
@@ -447,34 +496,6 @@ class hrsObs:
     self.error                 = applyBothCuts[0]
 
     self.log.append('Trimmed')
-
-  def getAlignmentOffset(self, padLen=None, peak_half_width=3,
-                        upSampleFactor=1000, verbose=False
-  ):
-    '''
-      Caclulates the alignment offset of each spectrum and the spectrum with the highest SNR. Returns that offset. 
-
-      Parameters:
-        padLen (int): amount of zeros to pad to array before fft 
-
-        peak_half_width (int): number of points to include in a region around the xcor peak when upsampling
-
-        upSampleFactor (int): factor by which to upsample the data when interpolating. Limits the precision 
-            of the returned centers (i.e. an upSampleFactor of 10 can find peaks to a 0.1 precision level)
-
-      Returns:
-        offsets (1d-array): Wavelength offsets of each spectrum in pixel terms
-    '''
-
-    highSNR   = hru.getHighestSNR(self.data, self.error)
-
-    offsets = hru.alignment(self.data, self.data[highSNR],
-                        returnOffset=True, padLen=padLen,
-                        peak_half_width=peak_half_width,
-                        upSampleFactor=upSampleFactor,
-                        verbose=verbose)
-
-    return offsets
 
   def alignData(self, iterations=1, padLen=None,
                 peak_half_width=3, upSampleFactor=1000,
@@ -672,14 +693,12 @@ class hrsObs:
         verbose (bool): Whether or not to progressbar
     '''
     try:
-      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.times,
-                                  self.orbParams, self.barycentricCorrection,
-                                  unitPrefix=unitPrefix, verbose=verbose)
+      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
+                                  self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose)
     except AttributeError:
       self.generateXCM()
-      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.times,
-                                  self.orbParams, self.barycentricCorrection,
-                                  unitPrefix=unitPrefix, verbose=verbose)
+      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
+                                  self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose)
 
     self.kpRange = kpRange
     self.sigMat = sigMat
@@ -889,12 +908,8 @@ class hrsObs:
     xcm = self.xcm.copy()
     alignmentStr = ''
     if alignmentKp is not None:
-      unitOrbParams = self.orbParams.copy()
-      unitOrbParams['Kp'] = 1
-      unitOrbParams['v_sys'] = 0
+      unitRVs = self.getRVs(unitRVs=True)
 
-      # Calculate unitRVs (ie RV = Kp * unitRV)
-      unitRVs = getRV(self.times, **unitOrbParams)
       rv = alignmentKp * unitRVs + self.barycentricCorrection/unitPrefix
       xcm = hru.alignXCM(xcm, self.crossCorVels, rv, isInterpolatedXCM=False)
       alignmentStr = 'Aligned to Kp='+str(alignmentKp)+' '+str(velocityUnits)+'.'

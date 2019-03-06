@@ -881,6 +881,8 @@ def varianceWeighting(data, axis=-2):
 ###
 
 #-- Comparing Data to template
+# def injectFakeSignal(data, wavelengths, )
+
 def generateXCM(data, template,
                 normalizeXCM=True,
                 xcorMode='same',
@@ -1044,9 +1046,8 @@ def addMatricies(matricies, xAxes, outputXAxis):
   summed = np.sum(summed,0)
   return summed
 
-def generateSigMat(xcm, kpRange, wavelengths, times, orbParams,
-                   barycentricCorrection, 
-                   unitPrefix=1, verbose=False
+def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
+                   barycentricCorrection, unitPrefix=1, verbose=False
 ):
   '''
     Generates a significanceMatrix sigMat by aligning a cross correlation matrix to orbital solutions with
@@ -1061,9 +1062,7 @@ def generateSigMat(xcm, kpRange, wavelengths, times, orbParams,
 
       wavelengths (1d-array): Wavelengths of data used to generate xcm
 
-      times (1d-array): Timestamps of spectra taken
-
-      orbParams (dict): dictionary containing the orbital solution (P, T_0, e, w_deg)
+      unitRVs (1d-array): RV values normalized so Kp = 1, vsys=0
 
       barycentricCorrection (1d-array): Barycentric velocities at the time of the observations
 
@@ -1076,13 +1075,6 @@ def generateSigMat(xcm, kpRange, wavelengths, times, orbParams,
     Returns:
       SigMat (2d-array): Array of added CCF values with axes of kpRange and systemicVelocity (determined by CCF velocities). Normalize to find significance values
   '''
-  # Make sure orbital Parameters doesn't specity Kp, v_sys
-  unitOrbParams = orbParams.copy()
-  unitOrbParams['Kp'] = 1
-  unitOrbParams['v_sys'] = 0
-
-  # Calculate unitRVs (ie RV = Kp * unitRV)
-  unitRVs = getRV(times, **unitOrbParams)
 
   # Convert XCM to spline representation for faster calculation
   xcorVelocities = getCrossCorrelationVelocity(wavelengths, unitPrefix=unitPrefix)
