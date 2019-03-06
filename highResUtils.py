@@ -1052,9 +1052,8 @@ def generateSigMat(xcm, kpRange, wavelengths, times, orbParams,
   unitRVs = getRV(times, **unitOrbParams)
 
   # Convert XCM to spline representation for faster calculation
-  xcorInterps    = [interpolate.splrep(xcorVelocities, ccf) for ccf in xcm]
-
   xcorVelocities = getCrossCorrelationVelocity(wavelengths, unitPrefix=unitPrefix)
+  xcorInterps    = [interpolate.splrep(xcorVelocities, ccf) for ccf in xcm]
 
   seq = kpRange
   if verbose:
@@ -1071,4 +1070,33 @@ def generateSigMat(xcm, kpRange, wavelengths, times, orbParams,
 
   return np.array(sigMat)
 
+def normalizeSigMat(sigMat, rowByRow=False, byPercentiles=False):
+  '''
+    Normalizes the significance matrix so each value represents a sigma rather than an arbitrary value.
+      Divides the values in sigMat by the standard deviation of sigMat
+
+      Parameters:
+        sigMat (2d-array): 2d un-normalized significance matrix
+        rowByRow (bool): whether to normalize by the standard deviation of each row (rowByRow = True)
+                         or the whole matrix (rowByRow = False)
+
+        byPercentiles (bool): whether to normalize by the actual standard deviation (byPercentiles = False)
+                              or by the 16th-84th percentiles (i.e. encompasing 68% of the data)
+                                (byPercentiles=True)
+      Returns:
+        normSigMat (2d-array): the normalized significance matrix
+  '''
+  if rowByRow:
+    if byPercentiles:
+      normSigMat = sigMat / np.apply_along_axis(percStd, 1, sigMat)[:,np.newaxis]
+    else:
+      normSigMat = sigMat / np.apply_along_axis(np.std, 1, sigMat)[:,np.newaxis]
+
+  else:
+    if byPercentiles:
+      normSigMat = sigMat / percStd(sigMat)
+    else:
+      normSigMat = sigMat / np.std(sigMat)
+
+  return normSigMat
 ###

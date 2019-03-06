@@ -719,20 +719,7 @@ class hrsObs:
                               or by the 16th-84th percentiles (i.e. encompasing 68% of the data)
                                 (byPercentiles=True)
     '''
-    sigMat = self.unNormedSigMat.copy()
-
-    if rowByRow:
-      if byPercentiles:
-        sigMat = sigMat / np.apply_along_axis(percStd, 1, sigMat)[:,np.newaxis]
-      else:
-        sigMat = sigMat / np.apply_along_axis(np.std, 1, sigMat)[:,np.newaxis]
-
-    else:
-      if byPercentiles:
-        sigMat = sigMat / percStd(sigMat)
-      else:
-        sigMat = sigMat / np.std(sigMat)
-
+    sigMat = hru.normalizeSigMat(self.unNormedSigMat, rowByRow=rowByRow, byPercentiles=byPercentiles)
     self.sigMat = sigMat
   ###
 
