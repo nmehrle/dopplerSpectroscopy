@@ -881,7 +881,79 @@ def varianceWeighting(data, axis=-2):
 ###
 
 #-- Comparing Data to template
-# def injectFakeSignal(data, wavelengths, )
+def generateFakeSignal(data, wavelengths, unitRVs, barycentricCorrection,
+                       fakeKp, fakeVsys, fakeSignalData, fakeSignalWave,
+                       relativeStrength=1/100, unitPrefix=1, returnInjection=False,
+                       verbose=False
+):
+  '''
+    Generates a fake signal from the provided orbital solution/signal data.
+    For each spectrum in data, interpolates the provided signal onto the wavelengths probed
+    by that observation, and sets it at a magnitude of relativeStrength * (median of that spectrum)
+
+    Parameters:
+      data (2d-array): Time series of spectra
+
+      wavelengths (1d-array): wavelengths observed by the detector, wavelength axis for data
+
+      unitRVs (1d-array): Radial velocities of the planet at times of observations normalized so
+                          Kp = 1, v_sys = 0
+
+      barycentricCorrection (1d-array): Barycentric velocity correction at times of observation in m/s
+
+      fakeKp (float): Kp value to inject fake signal at in units of unitPrefix
+
+      fakeVsys (float): Vsys value to inject fake signal at in units of unitPrefix
+
+      fakeSignalData (1d-array): Fluxs of signal to create fake data from.
+
+      fakeSignalWave (1d-array): Wavelengths for fakeSignalData
+
+      relativeStrength (float): Magnitude of fake signal to be created, relative to the median values of spectra
+                                in data. I.e. a spectrum in fakeSignal will have max value of median of corresponding spectrum in data
+
+      unitPrefix (float): Units of velocity divided by meter/second.
+        i.e. unitPrefix = 1000 implies velocity is in km/s
+             unitPrefix = (1000 / 86400) implies velocity is km/day
+
+      returnInjection (bool): If true, return data+fakeSignal, otherwise return just fakeSignal
+
+      verbose (bool): If true, show progress bar
+
+    Returns:
+      fakeSignal (2d-array): Fake signal as it would be observed by the detector
+
+      injectedSignal (2d-array): If returnInjection, returns fakeSignal+data
+
+  '''
+  # Interpolate the fake signal over it's wavelengths
+  signalInterp = interpolate.splrep(fakeSignalWave, fakeSignalData)
+
+  # Generate the fake planet velocities over this observation
+  velocities = fakeKp * unitRVs + barycentricCorrection/unitPrefix + fakeVsys
+
+  seq = velocities
+  if verbose:
+    seq = tqdm(velocities, desc='Injecting Fake Signal')
+
+  fakeSignal = []
+  for vel in seq:
+    # Calculate wavelengths in source frame that correspond to this observation
+    sourceWave = doppler(wavelengths, vel, unitPrefix=unitPrefix)
+
+    # Assemble array of normalized spectra
+    # thisFlux = normalize(interpolate.splev(sourceWave, signalInterp))
+    thisFlux = interpolate.splev(sourceWave, signalInterp)
+    fakeSignal.append(thisFlux)
+
+  # Multiply each normalized spectra by the median of the real flux observed at that time
+  # and the relative signal strength
+  fakeSignal = np.array(fakeSignal)# * np.median(data, 1)[:,np.newaxis] * relativeStrength
+
+  if returnInjection:
+    return fakeSignal+data
+
+  return fakeSignal
 
 def generateXCM(data, template,
                 normalizeXCM=True,
