@@ -128,7 +128,6 @@ class hrsObs:
   def template(self, value):
     if value is None:
       del self.template
-      del self.templateUnits
       return
       
 
@@ -143,25 +142,27 @@ class hrsObs:
       raise KeyError('Template "'+str(value)+'" not defined for planet "'+str(self.planet)+'".')
 
     try:
-      self.templateUnits = self.allTemplateUnits[value]
+      templateUnits = self.allTemplateUnits[value]
     except:
       raise KeyError('Units not specified for template "' + str(value) + '". Please enter the value used to convert to microns into the database, i.e. if the template data is in angstroms, enter 10000.')
 
     try:
-      self.templateData = readFile(templateFile)
+      templateData = readFile(templateFile)
     except ValueError:
       raise ValueError('Problem with database entry: template "'+str(value)+'", file "'+str(templateFile)+'" not supported.')
     except FileNotFoundError:
       raise FileNotFoundError('Template File "'+str(templateFile)+'" not found.')
 
     self._template = value
+    self.templateWave = templateData['wavelengths']/templateUnits
+    self.templateFlux = templateData['flux']
 
   @template.deleter
   def template(self):
     self._template = None
     try:
-      del self.templateData
-      del self.templateUnits
+      del self.templateWave
+      del self.templateFlux
     except AttributeError:
       pass
   ###
@@ -668,9 +669,7 @@ class hrsObs:
     '''
     # Interpolate template onto detector wavelengths.
     # If detector wavelength is not in template wavelengths, throw an error
-    templateWave = self.templateData['wavelengths']/self.templateUnits
-    templateFlux = self.templateData['flux']
-    interpolatedTemplate = interpolateData(templateFlux, templateWave, self.wavelengths, ext=2)
+    interpolatedTemplate = interpolateData(self.templateFlux, self.templateWave, self.wavelengths, ext=2)
 
     self.xcm = hru.generateXCM(self.data, interpolatedTemplate, normalizeXCM=normalizeXCM,
                                 xcorMode=xcorMode, verbose=verbose)
