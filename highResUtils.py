@@ -942,13 +942,12 @@ def generateFakeSignal(data, wavelengths, unitRVs, barycentricCorrection,
     sourceWave = doppler(wavelengths, vel, unitPrefix=unitPrefix)
 
     # Assemble array of normalized spectra
-    # thisFlux = normalize(interpolate.splev(sourceWave, signalInterp))
-    thisFlux = interpolate.splev(sourceWave, signalInterp)
+    thisFlux = normalize(interpolate.splev(sourceWave, signalInterp))
     fakeSignal.append(thisFlux)
 
   # Multiply each normalized spectra by the median of the real flux observed at that time
   # and the relative signal strength
-  fakeSignal = np.array(fakeSignal)# * np.median(data, 1)[:,np.newaxis] * relativeStrength
+  fakeSignal = np.array(fakeSignal) * np.median(data, 1)[:,np.newaxis] * relativeStrength
 
   if returnInjection:
     return fakeSignal+data
@@ -1196,4 +1195,212 @@ def normalizeSigMat(sigMat, rowByRow=False, byPercentiles=False):
       normSigMat = sigMat / np.std(sigMat)
 
   return normSigMat
+###
+
+#-- Plotting
+def windowData(data, xs, ys, xlim=None, ylim=None):
+  '''
+    Uses xs,ys xlim and ylim to limit the range of data to just the provided ranges
+    Could just use xlim/ylim, but this allows us to find features only within the limits
+
+    Parameters:
+      data (2d-array): (M x N) array
+
+      xs (1d-array): Length N array of x values for data
+
+      ys (1d-array): Length M array of y values for data
+
+      xlim (length 2 array): minimum and maximum values for desired output x-range
+
+      ylim (length 2 array): minimum and maximum values for desired output y-range
+
+    Returns
+      windowed (2d-array): data cut down to the provided limits
+
+      windowXs (1d-array): Xs cut down to the provided limits
+
+      windowYs (1d-array): Ys cut down to the provided limits
+  '''
+
+  # Limit Data to the provided X,Y ranges
+  if xlim is None:
+    xlim = [np.min(xs), np.max(xs)]
+  if ylim is None:
+    ylim = [np.min(ys), np.max(ys)]
+
+  left_cut  = np.argmin(np.abs(xs - xlim[0]))
+  right_cut = np.argmin(np.abs(xs - xlim[1]))
+  bot_cut   = np.argmin(np.abs(ys - ylim[0]))
+  top_cut   = np.argmin(np.abs(ys - ylim[1]))
+
+  windowed = data[bot_cut:top_cut+1, left_cut:right_cut+1]
+  windowXs = xs[left_cut:right_cut+1]
+  windowYs = ys[bot_cut:top_cut+1]
+
+  return windowed, windowXs, windowYs
+
+def plotSigMat(sigMat, crossCorVels, kpRange,
+               targetKp=None, targetVsys=None,
+               xlim=[-100,100], ylim=None, clim=[None,None],
+               figsize=None, cmap='viridis',
+               title='', saveName=None,
+               unitStr='km/s'
+):
+  '''
+    plots a given significance Matrix, marks the maximum value in the specified range.
+    Also marks the targeted value if specified.
+
+    Parameters:
+      sigMat (2d-array): Significance Matrix to plot
+
+      crossCorVels (1d-array): x-axis for sigMat
+
+      kpRange (1d-array): y-axis for sigMat
+
+      targetKp (float): target Kp to mark. Units same as kpRange
+
+      targetVsys (float): target Vsys to mark. Units same as crossCorVels
+
+      xlim (length 2 array): Minimum and maximum x-values to display
+
+      ylim (length 2 array): Minimum and maximum y-values to display
+
+      clim (length 2 array): Limits for colorbar
+
+      figsize (length 2 array): size of figure
+
+      cmap (str): colormap to use
+
+      title (str): Figure Title
+
+      saveName (str): If specified, will save figure at this location/name
+
+      unitStr (str): String to specify units on axes labels for both crossCorVels and kpRange
+  '''
+
+  windowed, xs, ys = windowData(sigMat, crossCorVels, kpRange, xlim, ylim)
+
+  # Offset by half spacing so pixels describe center not corner values
+  pltXs = xs - getSpacing(xs)/2
+  pltYs = ys - getSpacing(ys)/2
+
+  plt.figure(figsize=figsize)
+  plt.pcolormesh(pltXs, pltYs, windowed, cmap=cmap, vmin=clim[0], vmax=clim[1])
+  cbar = plt.colorbar()
+
+
+  # Mark Max Value
+  maxIndex = np.unravel_index(windowed.argmax(), windowed.shape)
+  maxX = xs[maxIndex[1]]
+  maxY = ys[maxIndex[0]]
+  plt.scatter(maxX, maxY, color='k', marker='P',s=50)
+  maxValStr = 'Max Value: ' + str(np.round(windowed[maxIndex],2)) + \
+                ': (' + str(np.round(maxX,1)) + ',' + \
+                str(int(np.round(maxY,0))) + ')'
+
+  # Draw lines over target params
+  if targetKp is not None:
+    plt.plot((pltXs[0],pltXs[-1]),(targetKp,targetKp),'r--')
+  if targetVsys is not None:
+    plt.plot((targetVsys,targetVsys),(pltYs[0],pltYs[-1]),'r--')
+
+  # If both targets are specified, get the marked value
+  if targetKp is not None and targetVsys is not None:
+    markYval = np.argmin(np.abs(ys - targetKp))
+    markXval = np.argmin(np.abs(xs - targetVsys))
+
+    targetStr = "\nTarget Value: " + str(np.round(windowed[markYval,markXval],2))
+
+  # Make sure there's no grey boarder
+  plt.axis('tight')
+
+  plt.xlabel('Systemic Velocity ('+str(unitStr)+')')
+  plt.ylabel('Kp ('+str(unitStr)+')')
+  cbar.set_label('Sigma')
+
+  # format title
+  if title!='' and title[-1] != '\n':
+    title+='\n'
+  plt.title(title + maxValStr + targetStr)
+
+  # Change mouseover events on jupyter to also show Z values
+  def fmt(x, y):
+    col = np.argmin(np.abs(xs-x))
+    row = np.argmin(np.abs(ys-y))
+    z = windowed[row,col]
+    return 'x=%1.1f, y=%1.1f, z=%1.2f' % (x, y, z)
+  plt.gca().format_coord = fmt
+
+  plt.tight_layout()
+
+  if saveName is not None:
+    plt.savefig(saveName)
+
+  plt.show()
+
+def plotData(data, xAxis=None, yAxis=None, xlabel='Index', ylabel='Index',
+             xlim=None, ylim=None, clim=[None,None],
+             figsize=None, cmap='viridis', title='', saveName=None
+):
+  '''
+    Plots the given 2d matrix data
+
+    Parameters:
+      data (2d-array): values to plot
+
+      xAxis (1d-array): x-axis for data, if not specified, defaults to index of value in data
+
+      yAxis (1d-array): y-axis for data, if not specified, defaults to index of value in data
+
+      xlabel (str): x label for plot
+
+      ylabel (str): y label for plot
+
+      xlim (length 2 array): Minimum and maximum x-values to display
+
+      ylim (length 2 array): Minimum and maximum y-values to display
+
+      clim (length 2 array): Limits for colorbar
+
+      figsize (length 2 array): size of figure
+
+      cmap (str): colormap to use
+
+      title (str): Figure Title
+
+      saveName (str): If specified, will save figure at this location/name
+    '''
+  # Set yAxis to frame number if none provided
+  if yAxis is None:
+    yAxis = np.arange(len(data))
+
+  if xAxis is None:
+    xAxis = np.arange(np.shape(data)[1])
+
+  windowed, xs, ys = windowData(data, xAxis, yAxis, xlim, ylim)
+
+  plt.figure(figsize=figsize)
+  plt.pcolormesh(xs, ys, windowed, cmap=cmap, vmin=clim[0], vmax=clim[1])
+  cbar = plt.colorbar()
+
+  plt.axis('tight')
+
+  plt.title(title)
+  plt.xlabel(xlabel)
+  plt.ylabel(ylabel)
+
+  plt.tight_layout()
+
+  # Change mouseover events on jupyter to also show Z values
+  def fmt(x, y):
+    col = np.argmin(np.abs(xs-x))
+    row = np.argmin(np.abs(ys-y))
+    z = windowed[row,col]
+    return 'x=%1.1f, y=%1.1f, z=%1.2f' % (x, y, z)
+  plt.gca().format_coord = fmt
+
+  if saveName is not None:
+    plt.savefig(saveName)
+
+  plt.show()
 ###
