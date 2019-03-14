@@ -431,7 +431,8 @@ class hrsObs:
     All require raw data having been collected as per collectRawData()
   '''
 
-  def trimData(self, doAutoTrimCols = False, plotResult=False, **kwargs):
+  def trimData(self, doAutoTrimCols = True, plotResult=False,
+               colTrimFunc=hru.findEdgeCuts_xcor, **kwargs):
     '''
       Runs highResUtils.trimData() on this observation. 
       Trims datasets according to rowCuts,colCuts and autoColTrimming
@@ -638,11 +639,36 @@ class hrsObs:
   ###
 
   #-- Comparing to Template
+  def injectFakeSignal(self, injectedKp, injectedVsys, relativeStrength=1/100, unitPrefix=1000, verbose=False):
+    '''
+      Injects the template signal into the data at the specified location and strength.
+
+      Parameters:
+        injectedKp (float): Kp of fake planet for injection.
+
+        injectedVsys (float): Vsys of fake planet for injection.
+
+        relativeStrength (float): Amplitude of template features relative to median of data
+
+        unitPrefix (float): Units of velocity divided by meter/second. (Velocity units of injectedKp, injectedVsys)
+        i.e. unitPrefix = 1000 implies velocity is in km/s
+             unitPrefix = (1000 / 86400) implies velocity is km/day
+
+        verbose (bool): If true, prints progress bar
+    '''
+    fakeSignal = hru.generateFakeSignal(self.data, self.wavelengths, self.getRVs(unitRVs=True),
+                                        self.barycentricCorrection, injectedKp, injectedVsys, self.templateFlux,
+                                        self.templateWave, relativeStrength=relativeStrength,
+                                        unitPrefix=unitPrefix, verbose=verbose, returnInjection=True)
+
+    self.data = fakeSignal
+    self.log.append('Injected Fake Signal at '+np.format_float_scientific(relativeStrength))
+
   def generateXCM(self, normalizeXCM=True, unitPrefix=1000, xcorMode='same', verbose=False):
     '''
       Calculates the cross-correlation matrix for this observation.
 
-      Cross correlates the current stage of foo.data with the template.
+      Cross correlates the current stage of self.data with the template.
 
       Stores result as self.xcm,
       Stores alos self.crossCorVels
@@ -677,7 +703,7 @@ class hrsObs:
 
   def generateSigMat(self, kpRange, unitPrefix=1000, verbose=False):
     '''
-      Generates a significance matrix for this observation. Will generate a CrossCorrelation matrix if it has not been set already, using the default parameters.
+      Generates a significance matrix for this observation. self.generateXCM() must be called before this function.
 
       Stores result as self.sigMat, and as self.unNormedSigMat
       Also stores kpRange which is needed to plot sigMat
@@ -691,13 +717,8 @@ class hrsObs:
 
         verbose (bool): Whether or not to progressbar
     '''
-    try:
-      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
-                                  self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose)
-    except AttributeError:
-      self.generateXCM()
-      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
-                                  self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose)
+    sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
+                                self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose)
 
     self.kpRange = kpRange
     self.sigMat = sigMat
@@ -731,112 +752,39 @@ class hrsObs:
     nameStr += 'Order: '+ str(self.order) + '\n'
     return nameStr
 
-
   def plotSigMat(self, xlim=[-100,100], ylim=None, clim=[None,None],
-                 figsize=None, cmap='viridis', title='', saveName=None,
-                 target_kp=None, target_vsys=None, unitStr='km/s'
+                  figsize=None, cmap='viridis', title='', saveName=None,
+                  targetKp=None, targetVsys=None, unitStr='km/s'
   ):
     '''
       Plots the significance matrix for this observation.
       Requires self.generateSigMat() has been called
     '''
-    windowed = self.sigMat
-    xs = self.crossCorVels
-    ys = self.kpRange
-
-    # Window sigMat to plotArea
-    # could just use xlim/ylim, but this makes it easier to find/mark the maxVal
-    if xlim is None:
-      xlim = [np.min(xs), np.max(xs)]
-    if ylim is None:
-      ylim = [np.min(ys), np.max(ys)]
-
-    left_cut  = np.argmin(np.abs(xs - xlim[0]))
-    right_cut = np.argmin(np.abs(xs - xlim[1]))
-    bot_cut   = np.argmin(np.abs(ys - ylim[0]))
-    top_cut   = np.argmin(np.abs(ys - ylim[1]))
-
-    windowed = windowed[bot_cut:top_cut+1, left_cut:right_cut+1]
-
-    # Window xs and ys
-    xs = xs[left_cut:right_cut+1]
-    ys = ys[bot_cut:top_cut+1]
-
-    # Offset by half spacing so pixels describe center not corner values
-    pltXs = xs - getSpacing(xs)/2
-    pltYs = ys - getSpacing(ys)/2
-
-    # Plot sigMat
-    plt.figure(figsize=figsize)
-    plt.pcolormesh(pltXs, pltYs, windowed, cmap=cmap, vmin=clim[0], vmax=clim[1])
-    cbar = plt.colorbar()
-
-    # Calculate and mark max value
-    maxIndex = np.unravel_index(windowed.argmax(), windowed.shape)
-    maxX = xs[maxIndex[1]]
-    maxY = ys[maxIndex[0]]
-    plt.scatter(maxX, maxY, color='k', marker='P',s=50)
-    highValStr = 'Max Value: ' + str(np.round(windowed[maxIndex],2)) + \
-                 ': (' + str(np.round(maxX,1)) + ',' + \
-                 str(int(np.round(maxY,0))) + ')'
 
     # Attempt to use self.orbParams if no target values are given
-    if target_kp is None:
+    if targetKp is None:
       try:
-        target_kp = self.orbParams['Kp']
+        targetKp = self.orbParams['Kp']
       except AttributeError:
         pass
 
-    if target_vsys is None:
+    if targetVsys is None:
       try:
-        target_vsys = self.orbParams['v_sys']
+        targetVsys = self.orbParams['v_sys']
       except AttributeError:
         pass
 
-    # Draw lines over target params
-    if target_kp is not None:
-      plt.plot((pltXs[0],pltXs[-1]),(target_kp,target_kp),'r--')
-    if target_vsys is not None:
-      plt.plot((target_vsys,target_vsys),(pltYs[0],pltYs[-1]),'r--')
+    fullTitle = self.getNameString() + title
 
-    # If both targets are specified, get the marked value
-    if target_kp is not None and target_vsys is not None:
-      markYval = np.argmin(np.abs(ys - target_kp))
-      markXval = np.argmin(np.abs(xs - target_vsys))
+    hru.plotSigMat(self.sigMat, self.crossCorVels, self.kpRange,
+                   targetKp=targetKp, targetVsys=targetVsys,
+                   xlim=xlim, ylim=ylim, clim=clim,
+                   figsize=figsize, cmap=cmap, title=fullTitle,
+                   saveName=saveName)
 
-      target_str = "\nTarget Value: " + str(np.round(windowed[markYval,markXval],2))
-
-    # apply limits so theres no extra grey border
-    plt.xlim(np.min(pltXs),np.max(pltXs))
-    plt.ylim(np.min(pltYs),np.max(pltYs))
-
-    plt.xlabel('Systemic Velocity ('+str(unitStr)+')')
-    plt.ylabel('Kp ('+str(unitStr)+')')
-    cbar.set_label('Sigma')
-
-    # format title
-    if title!='':
-      title+='\n'
-    plt.title(self.getNameString() + title + highValStr + target_str)
-
-    # Change mouseover events on jupyter to also show Z values
-    def fmt(x, y):
-      col = np.argmin(np.abs(xs-x))
-      row = np.argmin(np.abs(ys-y))
-      z = windowed[row,col]
-      return 'x=%1.1f, y=%1.1f, z=%1.2f' % (x, y, z)
-    plt.gca().format_coord = fmt
-
-    plt.tight_layout()
-
-    if saveName is not None:
-      plt.savefig(saveName)
-
-    plt.show()
-
-  def plotData(self, yscale='frame', cmap='viridis', clim=[None,None],
-               figsize=None, saveName=None, wavelengthUnits='microns',
-               title=''
+  def plotData(self, yscale='frame', xlim=None, ylim=None,
+               clim=[None,None], figsize=None, cmap='viridis',
+               title='', saveName=None, wavelengthUnits='microns'
   ):
     '''
       Plots the current stage of self.data()
@@ -854,12 +802,7 @@ class hrsObs:
     else:
       raise ValueError('yscale must be either "frame" or "time".')
 
-    plt.figure(figsize=figsize)
-    plt.pcolormesh(self.wavelengths, ys, self.data, cmap=cmap, vmin=clim[0], vmax=clim[1])
-    cbar = plt.colorbar()
-
-    plt.axis('tight')
-
+    # Format the log to add to the title
     processStr = 'Data Process: '
     for i, entry in enumerate(self.log):
       if i%3 == 0:
@@ -870,23 +813,21 @@ class hrsObs:
       if i != len(self.log)-1:
         processStr += ' --> '
 
-    if title != '':
+    if title != '' and title[-1] != '\n':
       title += '\n'
 
-    plt.title(self.getNameString() + title + processStr)
-    plt.xlabel('Wavelength ('+str(wavelengthUnits)+')')
-    plt.ylabel(ylabel)
+    fullTitle = self.getNameString() + title + processStr
+    xlabel = 'Wavelength ('+str(wavelengthUnits)+')'
 
-    plt.tight_layout()
-
-    if saveName is not None:
-      plt.savefig(saveName)
-
-    plt.show()
+    hru.plotData(self.data, self.wavelengths, ys, xlabel, ylabel,
+                 xlim=xlim, ylim=ylim, clim=clim,
+                 figsize=figsize, cmap=cmap, title=fullTitle,
+                 saveName=saveName)
 
   def plotXCM(self, yscale='frame', alignmentKp=None, unitPrefix=1000,
-              xlim=None, cmap='viridis', clim=[None,None], title='',
-              figsize=None, saveName=None, velocityUnits='km/s'
+              xlim=None, ylim=None, clim=[None,None],
+              figsize=None, cmap='viridis', title='',
+              saveName=None, velocityUnits='km/s'
   ):
     '''
       Plots Cross Correlation matrix for this observation.
@@ -904,6 +845,7 @@ class hrsObs:
     else:
       raise ValueError('yscale must be either "frame" or "time".')
 
+    # Perform alignment steps
     xcm = self.xcm.copy()
     alignmentStr = ''
     if alignmentKp is not None:
@@ -913,32 +855,16 @@ class hrsObs:
       xcm = hru.alignXCM(xcm, self.crossCorVels, rv, isInterpolatedXCM=False)
       alignmentStr = 'Aligned to Kp='+str(alignmentKp)+' '+str(velocityUnits)+'.'
 
-    # plot xcm
-    plt.figure(figsize=figsize)
-    plt.pcolormesh(self.crossCorVels, ys, xcm, cmap=cmap, vmin=clim[0], vmax=clim[1])
-    cbar = plt.colorbar()
+    # Get axes labels and plot
+    if title != '' and title[-1]!='\n':
+      title += '\n'
 
-    # limit Axes
-    if xlim is not None:
-      plt.xlim(*xlim)
-    else:
-      plt.xlim(np.min(self.crossCorVels),np.max(self.crossCorVels))
-    plt.ylim(np.min(ys),np.max(ys))
+    fullTitle = self.getNameString() + title + alignmentStr
+    xlabel = 'Cross Correlation Offset ('+str(velocityUnits)+')'
 
-    # label
-    plt.xlabel('Cross Correlation Offset ('+str(velocityUnits)+')')
-    plt.ylabel(ylabel)
-
-    if title != '':
-      title = title+'\n'
-    plt.title(self.getNameString() + title + alignmentStr)
-
-    plt.tight_layout()
-
-    if saveName is not None:
-      plt.savefig(saveName)
-
-    plt.show()
+    hru.plotData(xcm, self.crossCorVels, ys, xlabel, ylabel,
+                 xlim=xlim, ylim=ylim, clim=clim, figsize=figsize,
+                 cmap=cmap, title=fullTitle, saveName=saveName)
   ###
 
   #-- Convenience Functions
@@ -948,6 +874,9 @@ class hrsObs:
                   #alignData
                   alignmentIterations=1, alignmentPadLen=None,
                   alignmentPeakHalfWidth=3, alignmentUpSampFactor=1000,
+                  #injectData
+                  doInjectSignal=False, injectedKp=None, injectedVsys=None,
+                  injectedRelativeStrength=1/1000, unitPrefix=1000,
                   #normalize
                   normalizationScheme='divide_row',polyOrder=2,
                   #generateMask
@@ -969,6 +898,15 @@ class hrsObs:
     self.alignData(iterations=alignmentIterations, padLen=alignmentPadLen,
                    peak_half_width=alignmentPeakHalfWidth, upSampleFactor=alignmentUpSampFactor,
                    verbose=verbose)
+
+    if doInjectSignal:
+      print('---------------------------------')
+      print('----- Injecting Fake Signal -----')
+      print('---------------------------------')
+
+      self.injectFakeSignal(injectedKp=injectedKp, injectedVsys=injectedVsys,
+                            relativeStrength=injectedRelativeStrength,
+                            unitPrefix=unitPrefix, verbose=verbose)
 
     self.generateMask(use_time_mask=use_time_mask, use_wave_mask=use_wave_mask, plotResult=plotMasks,
                       relativeCutoff=maskRelativeCutoff, absoluteCutoff=maskAbsoluteCutoff,
