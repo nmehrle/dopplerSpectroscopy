@@ -1223,6 +1223,8 @@ def windowData(data, xs, ys, xlim=None, ylim=None):
   '''
 
   # Limit Data to the provided X,Y ranges
+  data = np.array(data)
+
   if xlim is None:
     xlim = [np.min(xs), np.max(xs)]
   if ylim is None:
