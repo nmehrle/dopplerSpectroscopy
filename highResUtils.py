@@ -1195,6 +1195,7 @@ def normalizeSigMat(sigMat, rowByRow=False, byPercentiles=False):
       normSigMat = sigMat / np.std(sigMat)
 
   return normSigMat
+
 ###
 
 #-- Plotting
@@ -1230,10 +1231,11 @@ def windowData(data, xs, ys, xlim=None, ylim=None):
   if ylim is None:
     ylim = [np.min(ys), np.max(ys)]
 
-  left_cut  = np.argmin(np.abs(xs - xlim[0]))
-  right_cut = np.argmin(np.abs(xs - xlim[1]))
-  bot_cut   = np.argmin(np.abs(ys - ylim[0]))
-  top_cut   = np.argmin(np.abs(ys - ylim[1]))
+  left_cut  = np.where(xs <= xlim[0])[0][-1]
+  right_cut = np.where(xs >= xlim[1])[0][0]
+
+  bot_cut   = np.where(ys <= ylim[0])[0][-1]
+  top_cut   = np.where(ys >= ylim[1])[0][0]
 
   windowed = data[bot_cut:top_cut+1, left_cut:right_cut+1]
   windowXs = xs[left_cut:right_cut+1]
