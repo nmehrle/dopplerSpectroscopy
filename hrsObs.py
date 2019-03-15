@@ -425,14 +425,16 @@ class hrsObs:
     rvs = getRV(self.times, **orbParams)
     return rvs
   ###
+
   #-- Processing Data
   '''
     These functions are for processing the raw data.
     All require raw data having been collected as per collectRawData()
   '''
 
-  def trimData(self, doAutoTrimCols = True, plotResult=False,
-               colTrimFunc=hru.findEdgeCuts_xcor, **kwargs):
+  def trimData(self, doAutoTrimCols=True, plotResult=False,
+               colTrimFunc=hru.findEdgeCuts_xcor, **kwargs
+  ):
     '''
       Runs highResUtils.trimData() on this observation. 
       Trims datasets according to rowCuts,colCuts and autoColTrimming
@@ -742,6 +744,81 @@ class hrsObs:
     '''
     sigMat = hru.normalizeSigMat(self.unNormedSigMat, rowByRow=rowByRow, byPercentiles=byPercentiles)
     self.sigMat = sigMat
+
+  def reportDetectionStrength(self, targetKp=None, targetVsys=None,
+                              kpSearchExtent=2, vsysSearchExtent=4,
+                              plotResult=False, saveName=None,
+                              plotKpExtent=40, plotVsysExtent=50,
+                              clim=[None,None], title='',
+                              figsize=None, cmap='viridis',
+                              unitStr='km/s', show=True
+  ):
+    '''
+      Reports the detection strength found within a region around targetKp, targetVsys
+
+      Looks at a rectangular region centered on targetKp, targetVsys of width 2x vsysSearchExtent,
+      height 2x kpSearchExtent. Finds the max value in this region and returns it as well as its coordinates
+
+      If plotResult is true, sigMat is plotted with a container drawn around the search region
+      the max value found in the search is marked with a triangle
+
+      Parameters:
+        targetKp (float): target Kp around which to search. Defaults to that in self.orbParams
+
+        targetVsys (float): target Vsys around which to search. Defaults to that in self.orbParams
+
+        kpSearchExtent(float): search will be performed encompassing region targetKp +- kpSearchExtent
+
+        vsysSearchExtent(float): search will be performed encompassing region targetVsys +- vsysSearchExtent
+
+        plotResult (bool): Plots sigmat if true
+
+        saveName (str): If specified, will save figure at this location/name
+
+        plotKpExtent (float): how far to go on either side of targetKp for plotting
+
+        plotVsysExtent (float): how far to go on either side of targetVsys for plotting
+
+        clim (length 2 array): Limits for colorbar
+
+        title (str): Figure Title
+
+        figsize (length 2 array): size of figure
+
+        cmap (str): colormap to use
+
+        unitStr (str): String to specify units on axes labels for both crossCorVels and kpRange
+
+        show (bool): If true, calls plt.show()
+
+      Returns:
+        detectionStrength (float): Maximum value of sigmat in search region
+
+        detectionCoords (length 2 array): Coordinates to found point
+    '''
+
+    # Attempt to use self.orbParams if no target values are given
+    if targetKp is None:
+      try:
+        targetKp = self.orbParams['Kp']
+      except AttributeError:
+        pass
+
+    if targetVsys is None:
+      try:
+        targetVsys = self.orbParams['v_sys']
+      except AttributeError:
+        pass
+
+    detectionStrength, detectionCoords = hru.reportDetectionStrength(
+                                            self.sigMat, self.crossCorVels, self.kpRange,
+                                            targetKp, targetVsys, kpSearchExtent=kpSearchExtent,
+                                            vsysSearchExtent=vsysSearchExtent, plotResult=plotResult,
+                                            saveName=saveName, plotKpExtent=plotKpExtent,
+                                            plotVsysExtent=plotVsysExtent, clim=clim, title=title,
+                                            figsize=figsize, cmap=cmap, unitStr=unitStr, show=show)
+
+    return detectionStrength, detectionCoords
   ###
 
   #-- Plotting
@@ -867,7 +944,7 @@ class hrsObs:
                  cmap=cmap, title=fullTitle, saveName=saveName)
   ###
 
-  #-- Convenience Functions
+  #-- Composite Functions
   def prepareData(self,
                   # TrimData
                   doAutoTrimCols=False, plotTrim=False,
@@ -921,4 +998,31 @@ class hrsObs:
     self.varianceWeight()
 
     self.applyMask()
+
+  def xcorAnalysis(self, kpRange,
+                   # Generate XCM
+                   normalizeXCM=True, xcorMode='same',
+                   # Normalize SigMat
+                   rowByRow=False, byPercentiles=False,
+                   # General
+                   unitPrefix=1000, verbose=False
+  ):
+    '''
+      Performs the steps in the Cross Correlation Analysis
+      Call self.prepareData() then self.xcorAnalysis()
+    '''
+
+    self.generateXCM(normalizeXCM=normalizeXCM, xcorMode=xcorMode,
+                     unitPrefix=unitPrefix, verbose=verbose)
+
+    self.generateSigMat(kpRange, unitPrefix=unitPrefix, verbose=verbose)
+
+    self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
+
+  def toBeNamed(self):
+    '''
+    '''
+
+    allSysrem = hru.sysrem
+    return 1
   ###
