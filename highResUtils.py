@@ -1196,6 +1196,111 @@ def normalizeSigMat(sigMat, rowByRow=False, byPercentiles=False):
 
   return normSigMat
 
+def reportDetectionStrength(sigMat, crossCorVels, kpRange,
+                            targetKp, targetVsys,
+                            kpSearchExtent=2, vsysSearchExtent=4,
+                            plotResult=False, saveName=None,
+                            plotKpExtent=40, plotVsysExtent=50,
+                            clim=[None,None], title='',
+                            figsize=None, cmap='viridis',
+                            unitStr='km/s', show=True
+):
+  '''
+    Reports the detection strength found within a region around targetKp, targetVsys
+
+    Looks at a rectangular region centered on targetKp, targetVsys of width 2x vsysSearchExtent,
+    height 2x kpSearchExtent. Finds the max value in this region and returns it as well as its coordinates
+
+    If plotResult is true, sigMat is plotted with a container drawn around the search region
+    the max value found in the search is marked with a triangle
+
+    Parameters:
+      sigMat (2d-array): Significance Matrix to plot
+
+      crossCorVels (1d-array): x-axis for sigMat
+
+      kpRange (1d-array): y-axis for sigMat
+
+      targetKp (float): target Kp around which to search. Units same as kpRange
+
+      targetVsys (float): target Vsys around which to search. Units same as crossCorVels
+
+      kpSearchExtent(float): search will be performed encompassing region targetKp +- kpSearchExtent
+
+      vsysSearchExtent(float): search will be performed encompassing region targetVsys +- vsysSearchExtent
+
+      plotResult (bool): Plots sigmat if true
+
+      saveName (str): If specified, will save figure at this location/name
+
+      plotKpExtent (float): how far to go on either side of targetKp for plotting
+
+      plotVsysExtent (float): how far to go on either side of targetVsys for plotting
+
+      clim (length 2 array): Limits for colorbar
+
+      title (str): Figure Title
+
+      figsize (length 2 array): size of figure
+
+      cmap (str): colormap to use
+
+      unitStr (str): String to specify units on axes labels for both crossCorVels and kpRange
+
+      show (bool): If true, calls plt.show()
+
+    Returns:
+      detectionStrength (float): Maximum value of sigmat in search region
+
+      detectionCoords (length 2 array): Coordinates to found point
+  '''
+
+  # Window data
+  kpLim   = [targetKp - kpSearchExtent, targetKp + kpSearchExtent]
+  vsysLim = [targetVsys - vsysSearchExtent, targetVsys + vsysSearchExtent]
+  windowed, windowXs, windowYs = windowData(sigMat, crossCorVels, kpRange,
+                                            xlim=vsysLim, ylim=kpLim)
+
+  detectionStrength = np.max(windowed)
+  detectionCoords   = list(np.unravel_index(np.argmax(windowed), np.shape(windowed)))
+
+  # Modify detection coordinates to relate to sigMat not windowed
+  detectionCoords[0] = detectionCoords[0] + np.where(kpRange == windowYs[0])[0][0]
+  detectionCoords[1] = detectionCoords[1] + np.where(crossCorVels == windowXs[0])[0][0]
+
+  if plotResult:
+    plotKpLim = [targetKp - plotKpExtent, targetKp + plotKpExtent]
+    plotVsysLim = [targetVsys - plotVsysExtent, targetVsys + plotVsysExtent]
+
+    plotSigMat(sigMat, crossCorVels, kpRange, targetKp, targetVsys,
+               xlim=plotVsysLim, ylim=plotKpLim, clim=clim, figsize=figsize,
+               cmap=cmap, title=title,saveName=None, unitStr=unitStr, show=False)
+
+    # Plot Container around search region
+    containerColor='k'
+    kpContainer = [kpLim[0]-getSpacing(kpRange)/2, kpLim[1]+getSpacing(kpRange)/2]
+    vsysContainer = [vsysLim[0]-getSpacing(crossCorVels), vsysLim[1]+getSpacing(crossCorVels)]
+    plt.plot((vsysContainer[0], vsysContainer[0]), kpContainer, c=containerColor)
+    plt.plot((vsysContainer[1], vsysContainer[1]), kpContainer, c=containerColor)
+    plt.plot(vsysContainer, (kpContainer[0], kpContainer[0]), c=containerColor)
+    plt.plot(vsysContainer, (kpContainer[1], kpContainer[1]), c=containerColor)
+
+    # Mark maximum in search area
+    plt.scatter(crossCorVels[detectionCoords[1]], kpRange[detectionCoords[0]],
+                color='k', marker='^', s=50)
+
+    ax = plt.gca()
+    theTitle = ax.get_title()
+    theTitle += ', Search Value: '+str(np.round(detectionStrength,2))
+    plt.title(theTitle)
+
+    if saveName is not None:
+      plt.savefig(saveName)
+
+    if show:
+      plt.show()
+
+  return detectionStrength, detectionCoords
 ###
 
 #-- Plotting
@@ -1248,7 +1353,7 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
                xlim=[-100,100], ylim=None, clim=[None,None],
                figsize=None, cmap='viridis',
                title='', saveName=None,
-               unitStr='km/s'
+               unitStr='km/s', show=True
 ):
   '''
     plots a given significance Matrix, marks the maximum value in the specified range.
@@ -1280,6 +1385,8 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
       saveName (str): If specified, will save figure at this location/name
 
       unitStr (str): String to specify units on axes labels for both crossCorVels and kpRange
+
+      show (bool): if True, calls plt.show()
   '''
 
   windowed, xs, ys = windowData(sigMat, crossCorVels, kpRange, xlim, ylim)
@@ -1340,7 +1447,8 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
   if saveName is not None:
     plt.savefig(saveName)
 
-  plt.show()
+  if show:
+    plt.show()
 
 def plotData(data, xAxis=None, yAxis=None, xlabel='Index', ylabel='Index',
              xlim=None, ylim=None, clim=[None,None],
