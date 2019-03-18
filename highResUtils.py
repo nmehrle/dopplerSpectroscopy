@@ -1336,11 +1336,27 @@ def windowData(data, xs, ys, xlim=None, ylim=None):
   if ylim is None:
     ylim = [np.min(ys), np.max(ys)]
 
-  left_cut  = np.where(xs <= xlim[0])[0][-1]
-  right_cut = np.where(xs >= xlim[1])[0][0]
+  # If limits are outside range we want to just take the entire range
+  # The try/except statements catch where np.where returns an empty array and sets cuts to the edges of the data
+  try:
+    left_cut  = np.where(xs <= xlim[0])[0][-1]
+  except IndexError:
+    left_cut = 0
 
-  bot_cut   = np.where(ys <= ylim[0])[0][-1]
-  top_cut   = np.where(ys >= ylim[1])[0][0]
+  try:
+    right_cut = np.where(xs >= xlim[1])[0][0]
+  except IndexError:
+    right_cut = len(xs)
+
+  try:
+    bot_cut   = np.where(ys <= ylim[0])[0][-1]
+  except IndexError:
+    bot_cut = 0
+
+  try:
+    top_cut   = np.where(ys >= ylim[1])[0][0]
+  except:
+    top_cut = len(ys)
 
   windowed = data[bot_cut:top_cut+1, left_cut:right_cut+1]
   windowXs = xs[left_cut:right_cut+1]
