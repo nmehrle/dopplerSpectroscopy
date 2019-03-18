@@ -1164,9 +1164,12 @@ def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
         i.e. unitPrefix = 1000 implies velocity is in km/s
              unitPrefix = (1000 / 86400) implies velocity is km/day
 
-      outputVelocities (array): Range of velocities for the final sigMat to cover. If passed, will trim down
-                                the native Cross Correlation velocities to only have accuracy over this range,
-                                but will result in a large speed increase
+      outputVelocities (array): velocities for sigMat to cover. Two Options:
+                                  Length 2 array (e.g. [-100,100]):
+                                    bounds velocities to this range but otherwise uses native resolution
+
+                                  Length n array (e.g. np.arange(-100,100)):
+                                    Interpolates results onto this velocity range. Useful for adding together several results
 
       returnXcorVels (bool): If true, returns the cross correlation velocity offsets for this sigMat.
                              Recommended to be true if outputVelocities is passed
@@ -1185,22 +1188,23 @@ def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
 
   # Apply provided limits to velocities for faster computation
   if outputVelocities is not None:
-    # First calculate all the RVs
-    # Find the extreme values
-    allRVs = np.tile(unitRVs, (len(kpRange),1)) * kpRange[:,np.newaxis]
-    allRVs = allRVs + barycentricCorrection/unitPrefix
-    minRV = np.min(allRVs)
-    maxRV = np.max(allRVs)
+    if len(outputVelocities) == 2:
+      # Keep native velocities, but bound results
+      lowerBound = np.searchsorted(xcorVelocities, outputVelocities[0])
+      upperBound = np.searchsorted(xcorVelocities, outputVelocities[1])
 
-    # Using these two values, we can say which velocity columns will contribute
-    # to the desired velocity range in the final sigMat
-    belowUpperBound = (xcorVelocities + minRV) <= np.max(outputVelocities)
-    aboveLowerBound = (xcorVelocities + maxRV) >= np.min(outputVelocities)
-    usableColumns = np.logical_and(aboveLowerBound,belowUpperBound)
+      # Extend by one to include the border values
+      if lowerBound != 0:
+        lowerBound = lowerBound - 1
 
-    # Extend usableColumns by 1 on both sides to include values just above limits
-    usableColumns = ndi.maximum_filter(usableColumns, size=3)
-    xcorVelocities = xcorVelocities[usableColumns]
+      if upperBound != len(xcorVelocities):
+        upperBound = upperBound + 1
+
+      xcorVelocities = xcorVelocities[lowerBound:upperBound]
+
+    else:
+      # Use this as the output velocity range
+      xcorVelocities = outputVelocities
 
   seq = kpRange
   if verbose:

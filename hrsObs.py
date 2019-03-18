@@ -738,9 +738,12 @@ class hrsObs:
         i.e. unitPrefix = 1000 implies velocity is in km/s
              unitPrefix = (1000 / 86400) implies velocity is km/day
 
-        outputVelocities (array): Range of velocities for the final sigMat to cover. If passed, will trim down
-                                the native Cross Correlation velocities to only have accuracy over this range,
-                                but will result in a large speed increase
+        outputVelocities (array): velocities for sigMat to cover. Two Options:
+                                  Length 2 array (e.g. [-100,100]):
+                                    bounds velocities to this range but otherwise uses native resolution
+
+                                  Length n array (e.g. np.arange(-100,100)):
+                                    Interpolates results onto this velocity range. Useful for adding together several results
 
         verbose (bool): Whether or not to progressbar
     '''
