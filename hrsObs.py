@@ -214,7 +214,7 @@ class hrsObs:
 
   def updateDatabase(self, initialize=False):
     '''
-      Descend into databse to the level specified by object attributes If (attr) is specified, (new attr) is set as per:
+      Descend into database to the level specified by object attributes If (attr) is specified, (new attr) is set as per:
 
       planet -> orbParams, starName, templates, templateFiles
       instrument -> observatory, dataFormat, dataPaths
@@ -432,8 +432,12 @@ class hrsObs:
     All require raw data having been collected as per collectRawData()
   '''
 
-  def trimData(self, doAutoTrimCols=True, plotResult=False,
-               colTrimFunc=hru.findEdgeCuts_xcor, **kwargs
+  def trimData(self, doAutoTrimCols=True,
+               colTrimFunc=hru.findEdgeCuts_xcor,
+               rowCuts='database', colCuts='database',
+               figTitle=None, plotResult=False,
+               neighborhood_size=30, gaussian_blur=10,
+               edge=0, rightEdge=None, relative=True
   ):
     '''
       Runs highResUtils.trimData() on this observation. 
@@ -444,32 +448,43 @@ class hrsObs:
 
         plotResult (bool): shows trimming plots
 
-        **kwargs:
-          entries should be:
-            rowCuts (list of integers): Indicies of rows to remove from the data
+        rowCuts (list of integers): Indicies of rows to remove from the data
 
-            colCuts (list of integers): Indicies of columns to remove
+        colCuts (list of integers): Indicies of columns to remove
 
-            colTrimFunc (function): function to use to autoTrim cols. Requires doAutoTrimCols=True.
+        colTrimFunc (function): function to use to autoTrim cols. Requires doAutoTrimCols=True.
                                 Options (extra parameters):
-                                  hru.findEdgeCuts_xcor (neighborhood_size)
-                                  hru.findEdgeCuts_gradient (gaussian_blur, neighborhood_size)
-                                  hru.findEdgeCuts_numeric (edge, rightEdge, relative)
+                                  findEdgeCuts_xcor (neighborhood_size)
+                                  findEdgeCuts_gradient (gaussian_blur, neighborhood_size)
+                                  findEdgeCuts_numeric (edge, rightEdge, relative)
+
+          colTrimFunc Parameters:
+            findEdgeCuts_xcor:
+              neighborhood_size (int): the region around each point to smooth snr/search for extrema
+
+            findEdgeCuts_gradient:
+              gaussian_blur (int) : the sigma to use when applying a gaussian filter to the data
+
+              neighborhood_size (int): the region around each point to smooth snr/search for extrema
+
+            findEdgeCuts_numeric:
+              edge (int): how many points to trim from either side
+
+              rightEdge (int): (optional) If entered, will use edge to trim from the left, rightEdge to trim from the right
+
+              relative (bool): (optional) If true, cuts are relative to length of data (i.e. edge = 10 takes 10 points from each side). If false, cuts are absolute (i.e. edge = 10, rightEdge = 1100 cuts between 10 and 1100)
     '''
 
     # Set hard row and col cuts
     # keyword has priority over database
-    try:
-      rowCuts = kwargs.pop('rowCuts')
-    except KeyError:
+    # Allow keyword None to specify no cuts explicitly
+    if rowCuts == 'database':
       try:
         rowCuts = self.dateLevelKeywords['rowCuts']
       except KeyError:
         rowCuts = None
 
-    try:
-      colCuts = kwargs.pop('colCuts')
-    except KeyError:
+    if colCuts == 'database':
       try:
         colCuts = self.dateLevelKeywords['colCuts']
       except KeyError:
@@ -480,17 +495,19 @@ class hrsObs:
     applyColCuts  = [self.wavelengths]
     applyBothCuts = [self.error]
 
-    try:
-      figTitle = kwargs.pop('figTile')
-    except KeyError:
-      figTile='Date: '+self.date+', Order: '+str(self.order) 
+    if figTitle is None:
+      figTitle='Date: '+self.date+', Order: '+str(self.order)
 
     data, applyRowCuts, applyColCuts, applyBothCuts = hru.trimData(self.data, 
                                           applyRowCuts, applyColCuts, applyBothCuts,
                                           rowCuts, colCuts, doAutoTrimCols,
+                                          colTrimFunc=colTrimFunc,
                                           plotResult=plotResult,
-                                          figTile=figTile,
-                                          **kwargs) 
+                                          figTitle=figTitle,
+                                          neighborhood_size=neighborhood_size,
+                                          gaussian_blur=gaussian_blur,
+                                          edge=edge, rightEdge=rightEdge,
+                                          relative=relative)
 
     # record results and log to order of operations
     self.data = data
@@ -947,7 +964,10 @@ class hrsObs:
   #-- Composite Functions
   def prepareData(self,
                   # TrimData
-                  doAutoTrimCols=False, plotTrim=False,
+                  doAutoTrimCols=True, plotTrim=False,
+                  colTrimFunc=hru.findEdgeCuts_xcor,
+                  neighborhood_size=30, gaussian_blur=10,
+                  edge=0, rightEdge=None, relative=True,
                   #alignData
                   alignmentIterations=1, alignmentPadLen=None,
                   alignmentPeakHalfWidth=3, alignmentUpSampFactor=1000,
@@ -963,15 +983,19 @@ class hrsObs:
                   maskWindowSize=25,
                   # sysrem
                   sysremIterations=1,
+                  stopBeforeSysrem=False,
                   verbose=False,
-                  **kwargs
   ):
     '''
       Performs the standard data preperation.
       Use this before calling self.generateXCM().
     '''
 
-    self.trimData(doAutoTrimCols=doAutoTrimCols, plotResult=plotTrim, **kwargs)
+    self.trimData(doAutoTrimCols=doAutoTrimCols, plotResult=plotTrim,
+                  colTrimFunc=colTrimFunc,
+                  neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
+                  edge=edge, rightEdge=rightEdge, relative=relative)
+
     self.alignData(iterations=alignmentIterations, padLen=alignmentPadLen,
                    peak_half_width=alignmentPeakHalfWidth, upSampleFactor=alignmentUpSampFactor,
                    verbose=verbose)
@@ -993,11 +1017,12 @@ class hrsObs:
 
     self.applyMask()
 
-    self.sysrem(nCycles=sysremIterations, verbose=verbose)
+    if not stopBeforeSysrem:
+      self.sysrem(nCycles=sysremIterations, verbose=verbose)
 
-    self.varianceWeight()
+      self.varianceWeight()
 
-    self.applyMask()
+      self.applyMask()
 
   def xcorAnalysis(self, kpRange,
                    # Generate XCM
@@ -1018,11 +1043,4 @@ class hrsObs:
     self.generateSigMat(kpRange, unitPrefix=unitPrefix, verbose=verbose)
 
     self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
-
-  def toBeNamed(self):
-    '''
-    '''
-
-    allSysrem = hru.sysrem
-    return 1
   ###

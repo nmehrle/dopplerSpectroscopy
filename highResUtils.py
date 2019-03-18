@@ -117,8 +117,7 @@ def findEdgeCuts_gradient(flux, gaussian_blur = 10, neighborhood_size = 30,
     Returns:
       leftCorner, rightCorner (int) - the indexes of the found 'edges'
   '''
-
-  # Smooth and get gradeint of median spectrum
+  # Smooth and get gradient of median spectrum
   signal = np.median(flux,0)
   smooth = ndi.gaussian_filter(signal, gaussian_blur)
   grad = np.gradient(smooth)
@@ -197,7 +196,6 @@ def findEdgeCuts_numeric(flux, edge=0, rightEdge=None, relative=True,
     Returns:
       left_bound, right_bound (int) - the indexes of the found 'edges'
   '''
-
   n = np.shape(flux)[1]
 
   left_bound = edge
@@ -240,7 +238,8 @@ def findEdgeCuts_numeric(flux, edge=0, rightEdge=None, relative=True,
 def trimData(flux,
           applyRowCuts=None, applyColCuts=None, applyBothCuts=None,
           rowCuts=None, colCuts=None, doAutoTrimCols=False, colTrimFunc=findEdgeCuts_xcor,
-          plotResult=False, figsize=(12,8), figTitle="", **kwargs
+          neighborhood_size=30, gaussian_blur=10, edge=0, rightEdge=None, relative=True,
+          plotResult=False, figsize=(8,6), figTitle=""
 ):
   '''
     Applys cuts to an array of data
@@ -266,24 +265,41 @@ def trimData(flux,
                                 findEdgeCuts_gradient (gaussian_blur, neighborhood_size)
                                 findEdgeCuts_numeric (edge, rightEdge, relative)
 
+        colTrimFunc Parameters:
+          findEdgeCuts_xcor:
+            neighborhood_size (int): the region around each point to smooth snr/search for extrema
+
+          findEdgeCuts_gradient:
+            gaussian_blur (int) : the sigma to use when applying a gaussian filter to the data
+
+            neighborhood_size (int): the region around each point to smooth snr/search for extrema
+
+          findEdgeCuts_numeric:
+            edge (int): how many points to trim from either side
+
+            rightEdge (int): (optional) If entered, will use edge to trim from the left, rightEdge to trim from the right
+
+            relative (bool): (optional) If true, cuts are relative to length of data (i.e. edge = 10 takes 10 points from each side). If false, cuts are absolute (i.e. edge = 10, rightEdge = 1100 cuts between 10 and 1100)
+
+
       plotResult (bool): Set true to show the cuts made
 
       figsize (tuple of 2 integers): figure size for plotResult
 
       figTitle (str): Title for figure
-
-      **kwargs : parameters for colTrimFunc
     
     Returns:
       flux, applyRowCuts, applyColCuts, applyBothCuts: Each of the input datasets after trimming
-
   '''
   nRows, nCols = flux.shape
 
   # Apply hard row cuts
   if rowCuts is not None:
     rowMask = np.ones(nRows)
-    rowMask[rowCuts] = 0
+    try:
+      rowMask[rowCuts] = 0
+    except IndexError:
+      raise IndexError("Provided rowCuts specify rows not in the data. Try reloading the raw data.")
     rowMask = rowMask.astype(bool)
 
     flux = flux[rowMask,...]
@@ -297,7 +313,10 @@ def trimData(flux,
   # Apply hard column cuts
   if colCuts is not None:
     colMask = np.ones(nCols)
-    colMask[colCuts] = 0
+    try:
+      colMask[colCuts] = 0
+    except IndexError:
+      raise IndexError("Provided colCuts specify collumns not in the data. Try reloading the raw data.")
     colMask = colMask.astype(bool)
 
     flux = flux[...,colMask]
@@ -319,7 +338,9 @@ def trimData(flux,
     axs=[None,None]
 
   if doAutoTrimCols:
-    leftEdge, rightEdge = colTrimFunc(flux, plotResult=plotResult, ax=axs[1], **kwargs)
+    leftEdge, rightEdge = colTrimFunc(flux, plotResult=plotResult, ax=axs[1],
+                            neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
+                            edge=edge, rightEdge=rightEdge, relative=relative)
     flux = flux[...,leftEdge:rightEdge]
     if applyColCuts is not None:
       for i in range(len(applyColCuts)):
