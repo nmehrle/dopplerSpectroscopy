@@ -1139,7 +1139,9 @@ def addMatricies(matricies, xAxes, outputXAxis):
   return summed
 
 def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
-                   barycentricCorrection, unitPrefix=1, verbose=False
+                   barycentricCorrection, unitPrefix=1,
+                   outputVelocities=None, returnXcorVels=False,
+                   verbose=False
 ):
   '''
     Generates a significanceMatrix sigMat by aligning a cross correlation matrix to orbital solutions with
@@ -1167,10 +1169,29 @@ def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
     Returns:
       SigMat (2d-array): Array of added CCF values with axes of kpRange and systemicVelocity (determined by CCF velocities). Normalize to find significance values
   '''
+  xcorVelocities = getCrossCorrelationVelocity(wavelengths, unitPrefix=unitPrefix)
 
   # Convert XCM to spline representation for faster calculation
-  xcorVelocities = getCrossCorrelationVelocity(wavelengths, unitPrefix=unitPrefix)
   xcorInterps    = [interpolate.splrep(xcorVelocities, ccf) for ccf in xcm]
+
+  # Apply provided limits to velocities for faster computation
+  if outputVelocities is not None:
+    # First calculate all the RVs
+    # Find the extreme values
+    allRVs = np.tile(unitRVs, (len(kpRange),1)) * kpRange[:,np.newaxis]
+    allRVs = allRVs + barycentricCorrection/unitPrefix
+    minRV = np.min(allRVs)
+    maxRV = np.max(allRVs)
+
+    # Using these two values, we can say which velocity columns will contribute
+    # to the desired velocity range in the final sigMat
+    belowUpperBound = (xcorVelocities + minRV) <= np.max(outputVelocities)
+    aboveLowerBound = (xcorVelocities + maxRV) >= np.min(outputVelocities)
+    usableColumns = np.logical_and(aboveLowerBound,belowUpperBound)
+
+    # Extend usableColumns by 1 on both sides to include values just above limits
+    usableColumns = ndi.maximum_filter(usableColumns, size=3)
+    xcorVelocities = xcorVelocities[usableColumns]
 
   seq = kpRange
   if verbose:
@@ -1184,6 +1205,9 @@ def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
     alignedXCM = alignXCM(xcorInterps, xcorVelocities, rvs, isInterpolatedXCM=True)
     sigMatRow = np.sum(alignedXCM,0)/m
     sigMat.append(sigMatRow)
+
+  if returnXcorVels:
+    return np.array(sigMat), xcorVelocities
 
   return np.array(sigMat)
 
@@ -1453,6 +1477,7 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
     plt.plot((targetVsys,targetVsys),(pltYs[0],pltYs[-1]),'r--')
 
   # If both targets are specified, get the marked value
+  targetStr=''
   if targetKp is not None and targetVsys is not None:
     markYval = np.argmin(np.abs(ys - targetKp))
     markXval = np.argmin(np.abs(xs - targetVsys))
