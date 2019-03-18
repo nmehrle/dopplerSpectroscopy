@@ -1164,10 +1164,19 @@ def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
         i.e. unitPrefix = 1000 implies velocity is in km/s
              unitPrefix = (1000 / 86400) implies velocity is km/day
 
+      outputVelocities (array): Range of velocities for the final sigMat to cover. If passed, will trim down
+                                the native Cross Correlation velocities to only have accuracy over this range,
+                                but will result in a large speed increase
+
+      returnXcorVels (bool): If true, returns the cross correlation velocity offsets for this sigMat.
+                             Recommended to be true if outputVelocities is passed
+
       verbose (bool): whether or not to progressbar
 
     Returns:
       SigMat (2d-array): Array of added CCF values with axes of kpRange and systemicVelocity (determined by CCF velocities). Normalize to find significance values
+
+      xcorVelocities (array): Array of velocities forming x-axis for SigMat
   '''
   xcorVelocities = getCrossCorrelationVelocity(wavelengths, unitPrefix=unitPrefix)
 

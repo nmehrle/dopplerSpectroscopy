@@ -718,9 +718,13 @@ class hrsObs:
 
     self.xcm = hru.generateXCM(self.data, interpolatedTemplate, normalizeXCM=normalizeXCM,
                                 xcorMode=xcorMode, verbose=verbose)
+
+    # Generate XCor velocities now to allow for plotting XCM, even though they'll be generated later too
     self.crossCorVels = hru.getCrossCorrelationVelocity(self.wavelengths, unitPrefix=unitPrefix)
 
-  def generateSigMat(self, kpRange, unitPrefix=1000, verbose=False):
+  def generateSigMat(self, kpRange, unitPrefix=1000,
+                     outputVelocities=None,
+                     verbose=False):
     '''
       Generates a significance matrix for this observation. self.generateXCM() must be called before this function.
 
@@ -734,10 +738,21 @@ class hrsObs:
         i.e. unitPrefix = 1000 implies velocity is in km/s
              unitPrefix = (1000 / 86400) implies velocity is km/day
 
+        outputVelocities (array): Range of velocities for the final sigMat to cover. If passed, will trim down
+                                the native Cross Correlation velocities to only have accuracy over this range,
+                                but will result in a large speed increase
+
         verbose (bool): Whether or not to progressbar
     '''
-    sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
+    if outputVelocities is None:
+      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
                                 self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose)
+    else:
+      sigMat, limitedVelocities = hru.generateSigMat(self.xcm, kpRange, self.wavelengths,
+                                self.getRVs(unitRVs=True), self.barycentricCorrection,
+                                outputVelocities=outputVelocities, returnXcorVels=True,
+                                unitPrefix=unitPrefix, verbose=verbose)
+      self.crossCorVels = limitedVelocities
 
     self.kpRange = kpRange
     self.sigMat = sigMat
