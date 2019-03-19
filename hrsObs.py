@@ -9,6 +9,24 @@ import matplotlib.pyplot as plt
 from scipy import ndimage as ndi
 from scipy import interpolate
 
+from pathos.multiprocessing import ProcessingPool as Pool
+from functools import partial
+
+def type_of_script():
+    try:
+        ipy_str = str(type(get_ipython()))
+        if 'zmqshell' in ipy_str:
+            return 'jupyter'
+        if 'terminal' in ipy_str:
+            return 'ipython'
+    except:
+        return 'terminal'
+
+if type_of_script() == 'jupyter':
+  from tqdm import tqdm_notebook as tqdm
+else:
+  from tqdm import tqdm
+
 
 class hrsObs:
   '''
@@ -786,7 +804,7 @@ class hrsObs:
                               plotKpExtent=40, plotVsysExtent=50,
                               clim=[None,None], title='',
                               figsize=None, cmap='viridis',
-                              unitStr='km/s', show=True
+                              unitStr='km/s', show=True, close=False
   ):
     '''
       Reports the detection strength found within a region around targetKp, targetVsys
@@ -826,6 +844,8 @@ class hrsObs:
 
         show (bool): If true, calls plt.show()
 
+        close(bool): If true, closes the plot
+
       Returns:
         detectionStrength (float): Maximum value of sigmat in search region
 
@@ -845,6 +865,10 @@ class hrsObs:
       except AttributeError:
         pass
 
+    # Mysteriously, calling print here resolves a broken pipe error
+    # caused by calling this function in a multiprocessing context.
+    # Do not delete
+    print('',end='')
     detectionStrength, detectionCoords = hru.reportDetectionStrength(
                                             self.sigMat, self.crossCorVels, self.kpRange,
                                             targetKp, targetVsys, kpSearchExtent=kpSearchExtent,
@@ -1045,6 +1069,8 @@ class hrsObs:
   def xcorAnalysis(self, kpRange,
                    # Generate XCM
                    normalizeXCM=True, xcorMode='same',
+                   # Generate SigMat
+                   outputVelocities=None,
                    # Normalize SigMat
                    rowByRow=False, byPercentiles=False,
                    # General
@@ -1058,7 +1084,213 @@ class hrsObs:
     self.generateXCM(normalizeXCM=normalizeXCM, xcorMode=xcorMode,
                      unitPrefix=unitPrefix, verbose=verbose)
 
-    self.generateSigMat(kpRange, unitPrefix=unitPrefix, verbose=verbose)
+    self.generateSigMat(kpRange, unitPrefix=unitPrefix, outputVelocities=outputVelocities, verbose=verbose)
 
     self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
+
+  def reportOnSingleSysremIteration(self, iteration, allSysremData, kpRange,
+            # XCor Analysis KWs
+              # Generate XCM
+              normalizeXCM=True, xcorMode='same',
+              # Generate SigMat
+              outputVelocities=None,
+              # Normalize SigMat
+              rowByRow=False, byPercentiles=False,
+            # Report Detection Strength KWs
+              kpSearchExtent=2, vsysSearchExtent=4,
+              plotDetection=False, savePrefix=None,
+              plotKpExtent=40, plotVsysExtent=40,
+              detectionUnitStr='km/s',
+              showDetectionPlots=False,
+              closeDetectionPlots=True,
+              detectionTitle='',
+              clim=[None,None],
+              cmap='viridis',
+              figsize=None,
+            # General
+              targetKp=None, targetVsys=None,
+              unitPrefix=1000, verbose=False
+  ):
+    '''
+      Used to allow reportDetectionStrength to be caled in a multiprocessing context
+    '''
+    theCopy = self.copy()
+    theCopy.data = allSysremData[iteration]
+
+    theCopy.xcorAnalysis(kpRange,
+                         normalizeXCM=normalizeXCM,
+                         xcorMode=xcorMode,
+                         outputVelocities=outputVelocities,
+                         rowByRow=rowByRow,
+                         byPercentiles=byPercentiles,
+                         unitPrefix=unitPrefix
+    )
+
+    if detectionTitle != '' and detectionTitle[-1] != '\n':
+      detectionTitle = detectionTitle + '\n'
+
+    titleStr = detectionTitle + 'Sysrem Iterations: '+str(iteration)
+    saveName = savePrefix + 'sysIt_'+str(iteration)+'.png'
+
+    detStrength, detCoords = theCopy.reportDetectionStrength(targetKp=targetKp, targetVsys=targetVsys,
+                                             kpSearchExtent=kpSearchExtent,
+                                             vsysSearchExtent=vsysSearchExtent,
+                                             plotResult=plotDetection,
+                                             plotKpExtent=plotKpExtent,
+                                             plotVsysExtent=plotVsysExtent,
+                                             unitStr=detectionUnitStr,
+                                             show=showDetectionPlots,
+                                             close=closeDetectionPlots,
+                                             clim=clim, cmap=cmap,
+                                             figsize=figsize,
+                                             title=titleStr,
+                                             saveName=saveName)
+
+    return detStrength
+
+  def reportSysremIterations(self, kpRange,
+                              maxIterations=10,
+                              cores=1,
+                              # Prepare Data KWs
+                                doAutoTrimCols=True,
+                                plotTrim=False,
+                                colTrimFunc=hru.findEdgeCuts_xcor,
+                                neighborhood_size=30, gaussian_blur=10,
+                                edge=0, rightEdge=None, relative=True,
+                                #alignData
+                                alignmentIterations=1,
+                                alignmentPadLen=None,
+                                alignmentPeakHalfWidth=3,
+                                alignmentUpSampFactor=1000,
+                                #injectData
+                                doInjectSignal=False,
+                                injectedRelativeStrength=1/1000,
+                                #normalize
+                                normalizationScheme='divide_row',polyOrder=2,
+                                #generateMask
+                                use_time_mask=True, use_wave_mask=False,
+                                plotMasks=False, maskRelativeCutoff=3,
+                                maskAbsoluteCutoff=0, maskSmoothingFactor=20,
+                                maskWindowSize=25,
+                              # XCor Analysis KWs
+                                # Generate XCM
+                                normalizeXCM=True, xcorMode='same',
+                                # Generate SigMat
+                                outputVelocities=None,
+                                # Normalize SigMat
+                                rowByRow=False, byPercentiles=False,
+                              # Report Detection Strength KWs
+                                kpSearchExtent=2, vsysSearchExtent=4,
+                                plotDetection=False, savePrefix=None,
+                                plotKpExtent=40, plotVsysExtent=40,
+                                detectionUnitStr='km/s',
+                                showDetectionPlots=False,
+                                closeDetectionPlots=True,
+                                detectionTitle='',
+                                clim=[None,None],
+                                cmap='viridis',
+                                figsize=None,
+                              # General
+                                targetKp=None, targetVsys=None,
+                                unitPrefix=1000, verbose=False
+  ):
+    '''
+      Given a hrsObs object, performs the data preparation and analysis,
+      and then reports the detection strength for each sysremIteration up to the
+      maxIterations specified.
+
+      Can be done in multiprocessing if cores > 1
+    '''
+
+    superVerbose = (verbose>1)
+
+    self.collectRawData()
+    self.prepareData(stopBeforeSysrem=True,
+                      doAutoTrimCols=doAutoTrimCols, plotTrim=plotTrim,
+                      colTrimFunc=colTrimFunc,
+                      neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
+                      edge=edge, rightEdge=rightEdge, relative=relative,
+                      #alignData
+                      alignmentIterations=alignmentIterations,
+                      alignmentPadLen=alignmentPadLen,
+                      alignmentPeakHalfWidth=alignmentPeakHalfWidth,
+                      alignmentUpSampFactor=alignmentUpSampFactor,
+                      #injectData
+                      doInjectSignal=doInjectSignal,
+                      injectedKp=targetKp, injectedVsys=targetVsys,
+                      injectedRelativeStrength=injectedRelativeStrength,
+                      #normalize
+                      normalizationScheme=normalizationScheme, polyOrder=polyOrder,
+                      #generateMask
+                      use_time_mask=use_time_mask, use_wave_mask=use_wave_mask,
+                      plotMasks=plotMasks, maskRelativeCutoff=maskRelativeCutoff,
+                      maskAbsoluteCutoff=maskAbsoluteCutoff,
+                      maskSmoothingFactor=maskSmoothingFactor,
+                      maskWindowSize=maskWindowSize,
+                      unitPrefix=1000, verbose=superVerbose
+    )
+
+    allSysremData = hru.sysrem(self.data, self.error, nCycles=maxIterations, returnAll=True)
+
+    detectionStrengths = []
+    partialReport = partial(self.reportOnSingleSysremIteration,
+                            allSysremData=allSysremData,
+                            kpRange=kpRange,
+                            # XCor Analysis KWs
+                              # Generate XCM
+                              normalizeXCM=normalizeXCM,
+                              xcorMode=xcorMode,
+                              # Generate SigMat
+                              outputVelocities=outputVelocities,
+                              # Normalize SigMat
+                              rowByRow=rowByRow,
+                              byPercentiles=byPercentiles,
+                            # Report Detection Strength KWs
+                              kpSearchExtent=kpSearchExtent,
+                              vsysSearchExtent=vsysSearchExtent,
+                              plotDetection=plotDetection,
+                              savePrefix=savePrefix,
+                              plotKpExtent=plotKpExtent,
+                              plotVsysExtent=plotVsysExtent,
+                              detectionUnitStr=detectionUnitStr,
+                              showDetectionPlots=showDetectionPlots,
+                              closeDetectionPlots=closeDetectionPlots,
+                              detectionTitle=detectionTitle,
+                              clim=clim,
+                              cmap=cmap,
+                              figsize=figsize,
+                            # General
+                              targetKp=targetKp,
+                              targetVsys=targetVsys,
+                              unitPrefix=unitPrefix,
+                              verbose=superVerbose
+                    )
+
+    if cores == 1:
+      seq = range(len(allSysremData))
+      if verbose:
+        seq = tqdm(seq, desc='Calculating Detection Strengths')
+
+      for iteration in seq:
+        detStrength = partialReport(iteration)
+
+        detectionStrengths.append(detStrength)
+    else:
+      # Cores is not 1 -> want to use multiprocessing
+      if verbose:
+        pbar = tqdm(total=len(allSysremData), desc='Calculating Detection Strengths')
+
+      pool = Pool(processes = cores)
+      seq = pool.imap(partialReport, range(len(allSysremData)))
+
+      # return seq
+      for detStrength in seq:
+        detectionStrengths.append(detStrength)
+        if verbose:
+          pbar.update()
+
+      if verbose:
+        pbar.close()
+
+    return detectionStrengths
   ###

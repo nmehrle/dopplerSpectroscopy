@@ -1261,7 +1261,7 @@ def reportDetectionStrength(sigMat, crossCorVels, kpRange,
                             plotKpExtent=40, plotVsysExtent=50,
                             clim=[None,None], title='',
                             figsize=None, cmap='viridis',
-                            unitStr='km/s', show=True
+                            unitStr='km/s', show=True, close=False
 ):
   '''
     Reports the detection strength found within a region around targetKp, targetVsys
@@ -1306,6 +1306,8 @@ def reportDetectionStrength(sigMat, crossCorVels, kpRange,
       unitStr (str): String to specify units on axes labels for both crossCorVels and kpRange
 
       show (bool): If true, calls plt.show()
+
+      close (bool): If true, closes the plot
 
     Returns:
       detectionStrength (float): Maximum value of sigmat in search region
@@ -1357,6 +1359,9 @@ def reportDetectionStrength(sigMat, crossCorVels, kpRange,
 
     if show:
       plt.show()
+
+    if close:
+      plt.close()
 
   return detectionStrength, detectionCoords
 ###
