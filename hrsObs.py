@@ -305,6 +305,17 @@ class hrsObs:
 
       del self.dates
 
+    # Set Order level parameters
+    if self.order is not None:
+      try:
+        self.orderLevelKeywords = database['orders'][str(self.order)]
+      except KeyError:
+        # This order is not in the database, print warning
+        print('Warning, No order level keywords found for planet "'+str(self.planet)+'", instrument "'+str(self.instrument)+'", date "'+str(self.date)+'", order: '+str(self.order)+'.')
+        self.orderLevelKeywords = {}
+
+      del self.database
+
   def isValid(self, warn=True, fatal=False):
     '''
       Checks if this observation object is "valid"
@@ -449,7 +460,6 @@ class hrsObs:
     These functions are for processing the raw data.
     All require raw data having been collected as per collectRawData()
   '''
-
   def trimData(self, doAutoTrimCols=True,
                colTrimFunc=hru.findEdgeCuts_xcor,
                rowCuts='database', colCuts='database',
@@ -651,7 +661,7 @@ class hrsObs:
     self.data = data
     self.log.append('Masked')
 
-  def sysrem(self, nCycles=1, verbose=False):
+  def sysrem(self, nCycles=None, verbose=False):
     '''
       Applies the Sysrem de-trending algorithm on this data.
 
@@ -660,6 +670,13 @@ class hrsObs:
 
         verbose (bool): Print Sysrem progress updates
     '''
+
+    # Try and read nCycles from database
+    if nCycles is None:
+      try:
+        nCycles = self.orderLevelKeywords['sysremIterations']
+      except KeyError:
+        nCycles = 1
 
     data = hru.sysrem(self.data, self.error, nCycles=nCycles, verbose=verbose, returnAll=False)
 
@@ -670,13 +687,12 @@ class hrsObs:
     '''
       Weights each column of data by its variance
     '''
-
     self.data = hru.varianceWeighting(self.data)
     self.log.append('Variance Weighted')
   ###
 
   #-- Comparing to Template
-  def injectFakeSignal(self, injectedKp, injectedVsys, relativeStrength=1/100, unitPrefix=1000, verbose=False):
+  def injectFakeSignal(self, injectedKp, injectedVsys, relativeStrength, unitPrefix=1000, verbose=False):
     '''
       Injects the template signal into the data at the specified location and strength.
 
@@ -1015,7 +1031,7 @@ class hrsObs:
                   alignmentPeakHalfWidth=3, alignmentUpSampFactor=1000,
                   #injectData
                   doInjectSignal=False, injectedKp=None, injectedVsys=None,
-                  injectedRelativeStrength=1/1000, unitPrefix=1000,
+                  injectedRelativeStrength=None, unitPrefix=1000,
                   #normalize
                   normalizationScheme='divide_row',polyOrder=2,
                   #generateMask
@@ -1024,9 +1040,11 @@ class hrsObs:
                   maskAbsoluteCutoff=0, maskSmoothingFactor=20,
                   maskWindowSize=25,
                   # sysrem
-                  sysremIterations=1,
+                  sysremIterations=None,
                   stopBeforeSysrem=False,
                   verbose=False,
+                  # Post Sysrem
+                  doVarianceWeight=True
   ):
     '''
       Performs the standard data preperation.
@@ -1062,7 +1080,8 @@ class hrsObs:
     if not stopBeforeSysrem:
       self.sysrem(nCycles=sysremIterations, verbose=verbose)
 
-      self.varianceWeight()
+      if doVarianceWeight:
+        self.varianceWeight()
 
       self.applyMask()
 
@@ -1072,6 +1091,7 @@ class hrsObs:
                    # Generate SigMat
                    outputVelocities=None,
                    # Normalize SigMat
+                   doNormalizeSigMat=True,
                    rowByRow=False, byPercentiles=False,
                    # General
                    unitPrefix=1000, verbose=False
@@ -1089,6 +1109,8 @@ class hrsObs:
     self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
 
   def reportOnSingleSysremIteration(self, iteration, allSysremData, kpRange,
+            # Preparation
+            doVarianceWeight=True,
             # XCor Analysis KWs
               # Generate XCM
               normalizeXCM=True, xcorMode='same',
@@ -1117,6 +1139,11 @@ class hrsObs:
     theCopy = self.copy()
     theCopy.data = allSysremData[iteration]
 
+    if doVarianceWeight:
+      theCopy.varianceWeight()
+
+    theCopy.applyMask()
+
     theCopy.xcorAnalysis(kpRange,
                          normalizeXCM=normalizeXCM,
                          xcorMode=xcorMode,
@@ -1130,9 +1157,13 @@ class hrsObs:
       detectionTitle = detectionTitle + '\n'
 
     titleStr = detectionTitle + 'Sysrem Iterations: '+str(iteration)
-    saveName = savePrefix + 'sysIt_'+str(iteration)+'.png'
+    if savePrefix is None:
+      saveName = None
+    else:
+      saveName = savePrefix + 'sysIt_'+str(iteration)+'.png'
 
-    detStrength, detCoords = theCopy.reportDetectionStrength(targetKp=targetKp, targetVsys=targetVsys,
+    detStrength, detCoords = theCopy.reportDetectionStrength(targetKp=targetKp,
+                                             targetVsys=targetVsys,
                                              kpSearchExtent=kpSearchExtent,
                                              vsysSearchExtent=vsysSearchExtent,
                                              plotResult=plotDetection,
@@ -1172,6 +1203,8 @@ class hrsObs:
                                 plotMasks=False, maskRelativeCutoff=3,
                                 maskAbsoluteCutoff=0, maskSmoothingFactor=20,
                                 maskWindowSize=25,
+                                # After Sysrem
+                                doVarianceWeight=True,
                               # XCor Analysis KWs
                                 # Generate XCM
                                 normalizeXCM=True, xcorMode='same',
@@ -1182,7 +1215,7 @@ class hrsObs:
                               # Report Detection Strength KWs
                                 kpSearchExtent=2, vsysSearchExtent=4,
                                 plotDetection=False, savePrefix=None,
-                                plotKpExtent=40, plotVsysExtent=40,
+                                plotKpExtent=60, plotVsysExtent=80,
                                 detectionUnitStr='km/s',
                                 showDetectionPlots=False,
                                 closeDetectionPlots=True,
@@ -1236,6 +1269,7 @@ class hrsObs:
     partialReport = partial(self.reportOnSingleSysremIteration,
                             allSysremData=allSysremData,
                             kpRange=kpRange,
+                            doVarianceWeight=doVarianceWeight,
                             # XCor Analysis KWs
                               # Generate XCM
                               normalizeXCM=normalizeXCM,
