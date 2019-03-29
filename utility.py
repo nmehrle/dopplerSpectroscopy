@@ -1,5 +1,6 @@
 import pickle
 import numpy as np
+import os
 
 from scipy import ndimage as ndi
 from scipy import constants, optimize, interpolate
@@ -36,6 +37,22 @@ def readFile(dataFile):
     raise ValueError('Error reading "'+dataFile+'" Currently only fits and pickle are supported')
 
   return data
+
+def makePaths(path):
+  '''
+    Given a path, this function goes through all included subpaths and creates them if they do not already exist
+
+    Parameters:
+      path (str): directory path e.g. "this/is/a/path/"
+  '''
+  dirList = path.split('/')
+
+  for i in range(1, len(dirList)):
+    subPath = '/'.join(dirList[:i])
+    if os.path.exists(subPath):
+      pass
+    else:
+      os.mkdir(subPath)
 ###
 
 #-- Object Manipulation
