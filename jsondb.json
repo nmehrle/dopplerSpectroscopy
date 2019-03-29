@@ -37,7 +37,26 @@
             "dateLevelKeywords": {
               "rowCuts": [95,94,0]
             },
-            "orders": {}
+            "orders": {
+              "0": {
+                "sysremIterations": 3
+              },
+              "1": {
+                "sysremIterations": 4
+              },
+              "2": {
+                "sysremIterations": 6
+              },
+              "3": {
+                "sysremIterations": 5
+              },
+              "4": {
+                "sysremIterations": 1
+              },
+              "5": {
+                "sysremIterations": 4
+              }
+            }
           },
           "2016oct20b": {
             "dateLevelKeywords": {},
