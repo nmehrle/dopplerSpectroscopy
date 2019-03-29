@@ -28,9 +28,7 @@ if type_of_script() == 'jupyter':
 else:
   from tqdm import tqdm
 
-
-
-#-- Composite Functions
+#-- Default
 def prepareData(obs,
                   # TrimData
                   doAutoTrimCols=True, plotTrim=False,
@@ -118,8 +116,10 @@ def xcorAnalysis(obs, kpRange,
   obs.generateSigMat(kpRange, unitPrefix=unitPrefix, outputVelocities=outputVelocities, verbose=verbose)
 
   obs.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
+###
 
-def reportOnSingleSysremIteration(obs, iteration, allSysremData, kpRange,
+#-- Sysrem Optimizing
+def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                   # Preparation
                   doVarianceWeight=True,
                   # XCor Analysis KWs
@@ -155,7 +155,7 @@ def reportOnSingleSysremIteration(obs, iteration, allSysremData, kpRange,
 
   theCopy.applyMask()
 
-  theCopy.xcorAnalysis(kpRange,
+  xcorAnalysis(theCopy, kpRange,
                        normalizeXCM=normalizeXCM,
                        xcorMode=xcorMode,
                        outputVelocities=outputVelocities,
@@ -249,7 +249,7 @@ def reportSysremIterations(obs, kpRange,
   superVerbose = (verbose>1)
 
   obs.collectRawData()
-  obs.prepareData(stopBeforeSysrem=True,
+  prepareData(obs, stopBeforeSysrem=True,
                     doAutoTrimCols=doAutoTrimCols, plotTrim=plotTrim,
                     colTrimFunc=colTrimFunc,
                     neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
@@ -279,7 +279,8 @@ def reportSysremIterations(obs, kpRange,
   detectionStrengths = []
   detectionCoords    = []
   iterativeSigMats   = []
-  partialReport = partial(obs.reportOnSingleSysremIteration,
+  partialReport = partial(reportOnSingleSysremIteration,
+                          obs=obs,
                           allSysremData=allSysremData,
                           kpRange=kpRange,
                           doVarianceWeight=doVarianceWeight,
@@ -346,4 +347,8 @@ def reportSysremIterations(obs, kpRange,
       pbar.close()
 
   return detectionStrengths, detectionCoords
+###
+
+#-- Injection/Recovery
+
 ###
