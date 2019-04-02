@@ -65,5 +65,95 @@
         }
       }
     }
+  },
+  "ups-and": {
+    "orbitalParamters": {
+      "P": 4.61711,
+      "e": 0.012,
+      "t0": 2450034.06,
+      "w_deg": 44.519,
+      "Kp": 55,
+      "v_sys": -28.59
+    },
+    "starName": "upsilon andromedae",
+    "templates": {
+      "directory": "/dash/exobox/code/python/nmehrle/templates/",
+      "inverted": "upsand-invert.pickle",
+      "non-inverted": "upsand-noinvert.pickle"
+    },
+    "templateUnits": {
+      "inverted": 10000,
+      "non-inverted": 10000
+    },
+    "instruments":{
+      "aries": {
+        "observatory": "MMT",
+        "dataFormat": "order",
+        "dataPaths": {
+          "dateDirectoryPrefix": "/dash/exobox/proj/pcsa/data/ARIES/proc/",
+          "dateDirectorySuffix": "/",
+          "orderFilePrefix": "order_",
+          "orderFileSuffix": ".pickle",
+          "headerFile": "allHeaders.pickle"
+        },
+        "dates": {
+          "2016oct16": {
+            "dateLevelKeywords": {
+              "rowCuts": [3751]
+            },
+            "orders": {
+              "0": {},
+              "1": {},
+              "2": {
+                "relativeCutoff": 2
+              }
+            }
+          },
+          "2016oct17": {
+            "dateLevelKeywords": {
+            },
+            "orders": {}
+          }
+        }
+      },
+      "ishell": {
+        "observatory": "irtf",
+        "dataFormat": "irtf",
+        "dataPaths": {
+          "dateDirectoryPrefix": "/dash/exobox/proj/pcsa/data/IRTF/proc/",
+          "dateDirectorySuffix": "/",
+          "filePrefix": "spectra",
+          "fileSuffix": ".fits",
+          "headerFile": "allHeaders.pickle"
+        },
+        "dates": {
+          "2016nov04": {
+            "dateLevelKeywords": {
+            },
+            "orders": {}
+          },
+          "2016nov18": {
+            "dateLevelKeywords": {
+            },
+            "orders": {}
+          },
+          "2016nov30": {
+            "dateLevelKeywords": {
+            },
+            "orders": {}
+          },
+          "2016oct06": {
+            "dateLevelKeywords": {
+            },
+            "orders": {}
+          },
+          "2016oct15": {
+            "dateLevelKeywords": {
+            },
+            "orders": {}
+          }
+        }
+      }
+    }
   }
 }
