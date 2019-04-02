@@ -38,6 +38,8 @@ def prepareData(obs,
                   #alignData
                   alignmentIterations=1, alignmentPadLen=None,
                   alignmentPeakHalfWidth=3, alignmentUpSampFactor=1000,
+                  #remove Trends:
+                  doRemoveLFTrends=False, nTrends=1,
                   #injectData
                   doInjectSignal=False, injectedKp=None, injectedVsys=None,
                   injectedRelativeStrength=None, unitPrefix=1000,
@@ -68,6 +70,9 @@ def prepareData(obs,
   obs.alignData(iterations=alignmentIterations, padLen=alignmentPadLen,
                  peak_half_width=alignmentPeakHalfWidth, upSampleFactor=alignmentUpSampFactor,
                  verbose=verbose)
+
+  if doRemoveLFTrends:
+    obs.removeLowFrequencyTrends(nTrends=nTrends)
 
   if doInjectSignal:
     print('---------------------------------')
@@ -161,7 +166,8 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                        outputVelocities=outputVelocities,
                        rowByRow=rowByRow,
                        byPercentiles=byPercentiles,
-                       unitPrefix=unitPrefix
+                       unitPrefix=unitPrefix,
+                       verbose=verbose
   )
 
   if detectionTitle != '' and detectionTitle[-1] != '\n':
@@ -274,7 +280,12 @@ def reportSysremIterations(obs, kpRange,
                     unitPrefix=1000, verbose=superVerbose
   )
 
+  if verbose:
+    print('Running Sysrem')
   allSysremData = hru.sysrem(obs.data, obs.error, nCycles=maxIterations, returnAll=True)
+
+  if verbose:
+    print('Done with Sysrem')
 
   detectionStrengths = []
   detectionCoords    = []

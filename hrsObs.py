@@ -367,8 +367,7 @@ class hrsObs:
     self.isValid(fatal=True)
 
     # check validity of dataFormat
-    if self.dataFormat == 'order': 
-      
+    if self.dataFormat == 'order':
       dataDir    = self.dataPaths['dateDirectoryPrefix']+self.date+self.dataPaths['dateDirectorySuffix']
       dataFile   = dataDir + self.dataPaths['orderFilePrefix']+str(self.order)+self.dataPaths['orderFileSuffix']
       headerFile = dataDir+self.dataPaths['headerFile']
@@ -382,22 +381,71 @@ class hrsObs:
 
       self.times = np.array(headers['JD'])
 
-      # Try to load Barycentric Correction, write it if not found:
-      barycentryVelocityFile = dataDir+'barycentricVelocity.pickle'
+    elif self.dataFormat == 'irtf':
+      dataDir    = self.dataPaths['dateDirectoryPrefix']+self.date+self.dataPaths['dateDirectorySuffix']
+
+      rawFlux = []
+      wavelengths = []
+      error = []
+      times = []
+
+      # Load in data from files
+      for fn in os.listdir(dataDir):
+        prefixIndex = fn.find(self.dataPaths['filePrefix'])
+        suffixIndex = fn.find(self.dataPaths['fileSuffix']) + len(self.dataPaths['fileSuffix'])
+
+        # fn does not start with prefix/end with suffix
+        if prefixIndex != 0 or suffixIndex != len(fn):
+          continue
+
+        data = fits.getdata(dataDir+fn)
+        hdr  = fits.getheader(dataDir+fn)
+
+        try:
+          rawFlux.append(data[int(self.order), 1])
+          wavelengths.append(data[int(self.order), 0])
+          error.append(data[int(self.order), 2])
+        except ValueError:
+          raise ValueError('Order must be interpretable as an integer.')
+
+        times.append(float(hdr['MJD'])+2400000.5)
+
+      # Remove NaN's from data
+      rawFlux = np.array(rawFlux)
+      wavelengths = np.array(wavelengths)
+      error = np.array(error)
+
+      fnan = np.argwhere(np.isnan(rawFlux[0]))
       try:
-        self.barycentricCorrection = readFile(barycentryVelocityFile)
-      except FileNotFoundError:
-        # Barycentric Correction not on disk
+        fnan = fnan[0,0]
 
-        # Calculate it
-        self.barycentricCorrection = getBarycentricCorrection(self.times, self.starName, self.observatory,verbose=verbose)
+        rawFlux = rawFlux[:,:fnan]
+        wavelengths = wavelengths[:,:fnan]
+        error = error[:,:fnan]
+      except:
+        pass
 
-        # Write to disk
-        with open(barycentryVelocityFile,'wb') as f:
-          pickle.dump(self.barycentricCorrection,f)
+      self.rawFlux = rawFlux
+      self.error = error
+      self.wavelengths = wavelengths[0]
+      self.times = np.array(times)
 
     else:
-      raise ValueError('Currently only dataFormat "order" is accepted')
+      raise ValueError('Currently only dataFormat "order" and "irtf" are accepted')
+
+    # Try to load Barycentric Correction, write it if not found:
+    barycentryVelocityFile = dataDir+'barycentricVelocity.pickle'
+    try:
+      self.barycentricCorrection = readFile(barycentryVelocityFile)
+    except FileNotFoundError:
+      # Barycentric Correction not on disk
+
+      # Calculate it
+      self.barycentricCorrection = getBarycentricCorrection(self.times, self.starName, self.observatory,verbose=verbose)
+
+      # Write to disk
+      with open(barycentryVelocityFile,'wb') as f:
+        pickle.dump(self.barycentricCorrection,f)
 
     #set current data and keep track of order of operations
     self.data = self.rawFlux.copy()
@@ -576,6 +624,17 @@ class hrsObs:
     self.error = error
 
     self.log.append('Aligned')
+
+  def removeLowFrequencyTrends(self, nTrends=1):
+    '''
+      Removes the first nTrends fourier components from each spectrum in the data.
+      Does not remove the 0th component (mean).
+
+      Parameters:
+        nTrends (int): Number of fourier components to remove
+    '''
+    self.data = hru.removeLowFrequencyTrends(self.data, nTrends=nTrends)
+    self.log.append(str(nTrends)+" low freq trends removed")
 
   def normalizeData(self, normalizationScheme='divide_row', polyOrder=2):
     '''

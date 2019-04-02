@@ -356,7 +356,6 @@ def trimData(flux,
 
   return flux,applyRowCuts, applyColCuts,applyBothCuts
 
-
 def getHighestSNR(flux, error):
   '''
     Gives the index of the spectrum with the hightest median SNR in flux as flux/error
@@ -539,6 +538,29 @@ def alignment(flux, ref, iterations = 1,
   return alignment(shifted_flux, ref, iterations=iterations-1,
                     error=shifted_error, padLen=padLen, peak_half_width=peak_half_width,
                     upSampleFactor=upSampleFactor, verbose=verbose)
+
+def removeLowFrequencyTrends(data, nTrends=1):
+  '''
+    Removes the first nTrends fourier components from each spectrum in the data.
+      Does not remove the 0th component (mean).
+
+      Parameters:
+        flux (2d-array): 2d array of flux as (time, wavelength)
+
+        nTrends (int): Number of fourier components to remove
+  '''
+  corrected = []
+
+  for spectrum in data:
+    fourier = rfft(spectrum)
+
+    for trend in range(1,nTrends+1):
+      fourier[trend] = 0
+
+    correctedSpectrum =  np.fft.irfft(fourier)
+    corrected.append(correctedSpectrum[:len(spectrum)])
+
+  return np.array(corrected)
 
 def normalizeData(data, normalizationScheme='divide_row', polyOrder=2):
   '''
