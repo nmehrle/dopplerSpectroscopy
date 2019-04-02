@@ -11,6 +11,20 @@ from astropy.time import Time
 import barycorrpy
 from barycorrpy.utils import get_stellar_data
 
+def type_of_script():
+    try:
+        ipy_str = str(type(get_ipython()))
+        if 'zmqshell' in ipy_str:
+            return 'jupyter'
+        if 'terminal' in ipy_str:
+            return 'ipython'
+    except:
+        return 'terminal'
+
+if type_of_script() == 'jupyter':
+  from tqdm import tqdm_notebook as tqdm
+else:
+  from tqdm import tqdm
 
 #-- File I/O
 def readFile(dataFile):
@@ -385,11 +399,12 @@ def getRV(times, t0=0, P=0, w_deg=0, e=0, Kp=1, v_sys=0,
   return velocity
 
 def getBarycentricCorrection(times, starname, obsname, verbose=False, **kwargs):
-  if verbose:
-    print('Collecting Barycentric velocity.')
-
   bc=[]
-  for time in times:
+  if verbose:
+    seq = tqdm(times, desc='Collecting Barycentric velocity')
+  else:
+    seq = times
+  for time in seq:
     JDUTC = Time(time, format='jd',scale='utc')
     output=  barycorrpy.get_BC_vel(JDUTC, starname=starname, obsname=obsname)
     bc.append(output[0][0])
