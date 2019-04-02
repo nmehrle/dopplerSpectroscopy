@@ -27,7 +27,6 @@ if type_of_script() == 'jupyter':
 else:
   from tqdm import tqdm
 
-
 class hrsObs:
   '''
     An observation object
@@ -597,7 +596,7 @@ class hrsObs:
     self.log.append('Normalized: '+normalizationScheme)
 
   def generateMask(self, use_time_mask=True, use_wave_mask=False, plotResult=False,
-                   relativeCutoff=3, absoluteCutoff=0, smoothingFactor=20, windowSize=25
+                   relativeCutoff='default', absoluteCutoff='default', smoothingFactor=20, windowSize=25
   ):
     '''
       Generates a wavelength mask to apply to the data. Calls highResUtils.getTimeMask and highResUtils.getWaveMask to generate masks and combines them.
@@ -619,6 +618,20 @@ class hrsObs:
 
         plotResult(bool): plot each mask generated and the full mask
     '''
+
+    # Try and read keywords from database
+    if relativeCutoff == 'default':
+      try:
+        relativeCutoff = self.orderLevelKeywords['relativeCutoff']
+      except KeyError:
+        relativeCutoff = 3
+
+    if absoluteCutoff == 'default':
+      try:
+        absoluteCutoff = self.orderLevelKeywords['absoluteCutoff']
+      except KeyError:
+        absoluteCutoff = 0
+
     time_mask = np.ones(np.shape(self.data)[1])
     wave_mask = np.ones(np.shape(self.data)[1])
 
