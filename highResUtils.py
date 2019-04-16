@@ -967,7 +967,6 @@ def generateFakeSignal(data, wavelengths, unitRVs, barycentricCorrection,
       fakeSignal (2d-array): Fake signal as it would be observed by the detector
 
       injectedSignal (2d-array): If returnInjection, returns fakeSignal+data
-
   '''
   # Interpolate the fake signal over it's wavelengths
   signalInterp = interpolate.splrep(fakeSignalWave, fakeSignalData)

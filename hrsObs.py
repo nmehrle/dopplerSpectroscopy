@@ -11,6 +11,7 @@ from scipy import interpolate
 
 from pathos.multiprocessing import ProcessingPool as Pool
 from functools import partial
+import warnings
 
 def type_of_script():
     try:
@@ -310,7 +311,7 @@ class hrsObs:
         self.orderLevelKeywords = database['orders'][str(self.order)]
       except KeyError:
         # This order is not in the database, print warning
-        print('Warning, No order level keywords found for planet "'+str(self.planet)+'", instrument "'+str(self.instrument)+'", date "'+str(self.date)+'", order: '+str(self.order)+'.')
+        warnings.warn('No order level keywords found for planet "'+str(self.planet)+'", instrument "'+str(self.instrument)+'", date "'+str(self.date)+'", order: '+str(self.order)+'.')
         self.orderLevelKeywords = {}
 
       del self.database
@@ -499,6 +500,7 @@ class hrsObs:
       orbParams['v_sys'] = 0
 
     rvs = getRV(self.times, **orbParams)
+
     return rvs
   ###
 
