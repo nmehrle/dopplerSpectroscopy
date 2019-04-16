@@ -95,6 +95,37 @@ def dictDepth(d, level=0, empty=1):
 ###
 
 #-- Math
+def gaussian(x, mu, sig):
+  '''
+    returns a gaussian with mean mu, std deviation sig, on domain x
+
+    Parameters:
+      x (array): domain for gaussian
+
+      mu (float): mean of gaussian
+
+      sig (float): standard deviation
+
+    Returns:
+      y (array): gaussian values on domain x
+  '''
+
+  normalization = 1/np.sqrt(2 * np.pi * sig**2)
+  exponent = - ((x - mu)**2 / (2*sig**2))
+  y = normalization * np.exp(exponent)
+  return y
+
+def sigma2fwhm(sigma):
+  '''
+    converts sigma to full width at half maximum
+  '''
+  return sigma * np.sqrt(8 * np.log(2))
+
+def fwhm2sigma(fwhm):
+  return fwhm / np.sqrt(8 * np.log(2))
+###
+
+#-- Data
 def snr(data):
   ''' 
     Gives the SNR of a data, recommended to be a vector
@@ -351,7 +382,7 @@ def rowNorm(data):
   # phase func
   # w = w-180 equal to rv = -rv
   # switch to rv = -rv
-def getRV(times, t0=0, P=0, w_deg=0, e=0, Kp=1, v_sys=0,
+def getRV(times, t0=0, P=0, w_deg=0, e=0, inc = 90, Kp=1, v_sys=0,
         vectorizeFSolve = False, returnPhase=False, **kwargs
 ):
   """
@@ -363,6 +394,8 @@ def getRV(times, t0=0, P=0, w_deg=0, e=0, Kp=1, v_sys=0,
       # t, t0, P must be same units
   :param w_deg : Argument of periastron
       # degrees
+  :param inc   : inclination
+      #degrees
   :param Kp     : Planets Orbital Velocity
   :param v_sys : Velocity of System
       # K, v_sys must be same unit
@@ -395,6 +428,9 @@ def getRV(times, t0=0, P=0, w_deg=0, e=0, Kp=1, v_sys=0,
   # TODO
   # velocity = Kp * (np.cos(true_anomaly+w) + e*np.cos(w)) + v_sys
   velocity = Kp * (np.cos(true_anomaly+w) + e*np.cos(w))
+
+  # Apply inclination
+  velocity = velocity * np.sin(np.deg2rad(inc))
 
   return velocity
 

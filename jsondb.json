@@ -6,7 +6,8 @@
           "e": 0,
           "t0": 2454590.17936,
           "v_sys": -1.5,
-          "w_deg": 90
+          "w_deg": 90,
+          "inc"  : 90
     },
     "starName": "wasp 33",
     "templates": {
@@ -72,6 +73,7 @@
       "e": 0.012,
       "t0": 2450034.06,
       "w_deg": 44.519,
+      "inc": 24,
       "Kp": 55,
       "v_sys": -28.59
     },
@@ -102,8 +104,12 @@
               "rowCuts": [3751]
             },
             "orders": {
-              "0": {},
-              "1": {},
+              "0": {
+                "relativeCutoff": 3
+              },
+              "1": {
+                "relativeCutoff": 3
+              },
               "2": {
                 "relativeCutoff": 2
               }
@@ -111,8 +117,19 @@
           },
           "2016oct17": {
             "dateLevelKeywords": {
+              "rowCuts": []
             },
-            "orders": {}
+            "orders": {
+              "0": {
+                "relativeCutoff": 3
+              },
+              "1": {
+                "relativeCutoff": 2
+              },
+              "2": {
+                "relativeCutoff": 2
+              }
+            }
           }
         }
       },
@@ -129,8 +146,17 @@
         "dates": {
           "2016nov04": {
             "dateLevelKeywords": {
+              "rowCuts": [261]
             },
-            "orders": {}
+            "orders": {
+              "17": {},
+              "18": {},
+              "19": {},
+              "20": {},
+              "21": {},
+              "22": {},
+              "23": {}
+            }
           },
           "2016nov18": {
             "dateLevelKeywords": {
