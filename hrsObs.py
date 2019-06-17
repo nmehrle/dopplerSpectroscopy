@@ -141,16 +141,15 @@ class hrsObs:
   @property
   def template(self):
     return self._template
-  
+
   @template.setter
   def template(self, value):
     if value is None:
       del self.template
       return
-      
 
     try:
-      templateFile = self.templateFiles['directory'] + self.templateFiles[value]
+      templateFile = self.templateDB['directory'] + self.templateDB[value]['file']
     except AttributeError:
       if self.planet is None:
         raise AttributeError('Must specify planet before template.')
@@ -160,7 +159,7 @@ class hrsObs:
       raise KeyError('Template "'+str(value)+'" not defined for planet "'+str(self.planet)+'".')
 
     try:
-      templateUnits = self.allTemplateUnits[value]
+      templateUnits = self.templateDB[value]['units']
     except:
       raise KeyError('Units not specified for template "' + str(value) + '". Please enter the value used to convert to microns into the database, i.e. if the template data is in angstroms, enter 10000.')
 
@@ -175,12 +174,17 @@ class hrsObs:
     self.templateWave = templateData['wavelengths']/templateUnits
     self.templateFlux = templateData['flux']
 
+    self.templateResolution = self.templateDB[value]['resolution']
+    if self.templateResolution == 0:
+      self.templateResolution = None
+
   @template.deleter
   def template(self):
     self._template = None
     try:
       del self.templateWave
       del self.templateFlux
+      del self.templateResolution
     except AttributeError:
       pass
   ###
@@ -210,6 +214,13 @@ class hrsObs:
         setattr(theCopy, k, v)
 
     return theCopy
+
+  def keys(self):
+    '''
+      Returns all valid keys used for this object
+    '''
+
+    return list(self.__dict__.keys())
 
   def initializeDatabase(self):
     '''
@@ -265,8 +276,7 @@ class hrsObs:
 
       self.orbParams         = database['orbitalParamters']
       self.starName          = database['starName']
-      self.templateFiles     = database['templates']
-      self.allTemplateUnits  = database['templateUnits']
+      self.templateDB        = database['templates']
 
       self.templates         = list(database['templates'].keys())
       self.templates.remove('directory')
@@ -287,6 +297,7 @@ class hrsObs:
       self.dataFormat = database['dataFormat']
       self.dataPaths  = database['dataPaths']
       self.dates      = list(database['dates'].keys())
+      self.resolution = database['resolution']
 
       del self.instruments
 
@@ -783,8 +794,17 @@ class hrsObs:
 
         verbose (bool): If true, prints progress bar
     '''
+    templateMedW = np.median(self.templateWave)
+    R_template = self.templateResolution
+    if R_template is None:
+      R_template = templateMedW/getSpacing(self.templateWave)
+    obsMedW = np.median(self.wavelengths)
+
+    lowResTemplate = reduceSpectralResolution(self.templateWave, self.templateFlux, self.resolution,
+                                              R_template, obsMedW) 
+
     fakeSignal = hru.generateFakeSignal(self.data, self.wavelengths, self.getRVs(unitRVs=True),
-                                        self.barycentricCorrection, injectedKp, injectedVsys, self.templateFlux,
+                                        self.barycentricCorrection, injectedKp, injectedVsys, lowResTemplate,
                                         self.templateWave, relativeStrength=relativeStrength,
                                         unitPrefix=unitPrefix, verbose=verbose, returnInjection=True)
 

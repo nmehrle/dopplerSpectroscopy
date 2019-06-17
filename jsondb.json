@@ -12,15 +12,17 @@
     "starName": "wasp 33",
     "templates": {
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
-      "default": "wasp33.pickle"
-    },
-    "templateUnits": {
-      "default": 10000
+      "default": {
+        "file": "wasp33.pickle",
+        "units": 10000,
+        "resolution": 0
+      }
     },
     "instruments": {
       "aries": {
         "observatory": "MMT",
         "dataFormat": "order",
+        "resolution": 30000,
         "dataPaths": {
           "dateDirectoryPrefix": "/dash/exobox/proj/pcsa/data/ARIES/proc/",
           "dateDirectorySuffix": "/",
@@ -80,17 +82,22 @@
     "starName": "upsilon andromedae",
     "templates": {
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
-      "inverted": "upsand-invert.pickle",
-      "non-inverted": "upsand-noinvert.pickle"
-    },
-    "templateUnits": {
-      "inverted": 10000,
-      "non-inverted": 10000
+      "inverted": {
+        "file": "upsand-invert.pickle",
+        "units": 10000,
+        "resolution": 0
+      },
+      "non-inverted": {
+        "file": "upsand-noinvert.pickle",
+        "units": 10000,
+        "resolution": 0
+      }
     },
     "instruments":{
       "aries": {
         "observatory": "MMT",
         "dataFormat": "order",
+        "resolution": 30000,
         "dataPaths": {
           "dateDirectoryPrefix": "/dash/exobox/proj/pcsa/data/ARIES/proc/",
           "dateDirectorySuffix": "/",

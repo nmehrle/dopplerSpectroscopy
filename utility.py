@@ -26,7 +26,7 @@ if type_of_script() == 'jupyter':
 else:
   from tqdm import tqdm
 
-#-- File I/O
+#-- File I˚/O
 def readFile(dataFile):
   '''
     Reads data from file. Currently supports fits, pickle
@@ -117,11 +117,14 @@ def gaussian(x, mu, sig):
 
 def sigma2fwhm(sigma):
   '''
-    converts sigma to full width at half maximum
+    converts gaussian sigma to full width at half maximum
   '''
   return sigma * np.sqrt(8 * np.log(2))
 
 def fwhm2sigma(fwhm):
+  '''
+    converts gaussian full width at half maximum to sigma
+  '''
   return fwhm / np.sqrt(8 * np.log(2))
 ###
 
@@ -365,6 +368,62 @@ def interpolateData(data, old_x, new_x, ext=3):
 def getSpacing(arr):
   return (arr[-1]-arr[0])/(len(arr)-1)
 
+def closestArgmin(A, B, edgeBehavior=0):
+  '''
+    For each element in A, finds the argument of the closest element in B.
+    Returns said arguments
+
+    found: https://stackoverflow.com/questions/45349561/find-nearest-indices-for-one-array-against-all-values-in-another-array-python
+
+    Parameters:
+      A (array): Array that we want closest elements in B for
+
+      B (array): Array of elements to compare against
+
+      edgeBehavior (int): determines how to handle elements in A outside the range of B
+        0 (default): Puts all values in A external to B in the edge bins
+        1 : Returns -1 for all values of A below lowest B, len(B) for all values of A above highest B
+        2 : Extrapolates B to have one more point in either direction, sorts according to edgeBehavior=0.
+            Returns -1 for all values belonging to (new) lowest bin, len(B) for all belonging to (new) highest Bin
+
+    Returns:
+      args (array): array of arguments of B elements, which are closest to each A element. 
+  '''
+
+  if edgeBehavior==2:
+    # Add external bins to B based on typical spacing and highest/lowest values
+    dB = getSpacing(B)
+    C = np.concatenate(([np.min(B)-dB],B,[np.max(B)+dB]))
+    B = C
+
+  L = B.size
+  # Sort B to make use of np.searchsorted
+  sidx_B = B.argsort()
+  sorted_B = B[sidx_B]
+
+  # Finds "right positions" -  B value that is just Above A
+  sorted_idx = np.searchsorted(sorted_B, A)
+
+  # If elements are beyond largest in B, return largest in B
+  sorted_idx[sorted_idx==L] = L-1
+
+  # determine if we need "left" or "right" positions
+  # mask is 1 if closer to "left" value - indicates need to round down
+  mask = (sorted_idx > 0) & \
+  ((np.abs(A - sorted_B[sorted_idx-1]) < np.abs(A - sorted_B[sorted_idx])) )
+
+  # Get original arguments of desired values
+  args = sidx_B[sorted_idx-mask]
+
+  if edgeBehavior==1:
+    # External values get marked as external
+    args[A < np.min(B)] = -1
+    args[A > np.max(B)] = len(B)
+  elif edgeBehavior==2:
+    args = args-1
+
+  return args
+
 def normalize(d, outRange=[0,1]):
   num = d-np.min(d)
   den = (np.max(d)-np.min(d))/(outRange[1]-outRange[0])
@@ -522,3 +581,58 @@ def inverseDoppler(observedWave, sourceWave, unitPrefix=1):
   v = beta * c
 
   return v
+
+def reduceSpectralResolution(x, y, R_low, R_high=None, lambda_mid=None, n=4):
+  '''
+     Reduces the spectral resolution of the input spectrum from R_high to R_low, by convolution.
+     Convolves input spectrum with gaussian kernel of fwhm:
+        np.sqrt(d_lambda_low^2 - d_lambda_high^2)
+
+    Parameters:
+      x (array): Input spectrum wavelengths
+
+      y (array): Input spectrum Values
+
+      R_low (float): Desired output resolution
+
+      R_high (float, optional): Input spectral resolution, if not entered, will be estimated from input spectrum
+
+      lambda_mid (float, optional): Midpoint of spectrum where R was calculated. If not entered, will be
+          estimated from input spectrum
+
+      n (float): Width of gaussian kernel in sigma
+
+    Returns:
+      lowRes (array): Reduced resolution spectrum on same wavelength grid as x
+  '''
+  dx = getSpacing(x)
+
+  # If lambda_mid is none, take median of input wavelengths
+  if lambda_mid is None:
+    lambda_mid = np.median(x)
+
+  # If R_high is none, use midpoint of x divided by spacing in x
+  if R_high is None:
+    R_high = lambda_mid/dx
+
+  # Create Gaussian kernel
+  fwhm = np.sqrt(R_high**2 - R_low**2)*(lambda_mid/(R_low*R_high))
+  sigma = fwhm2sigma(fwhm)
+
+  kernel_x = np.arange(-n*sigma, n*sigma+dx, dx)
+  kernel = gaussian(kernel_x,0,sigma)
+  kernel = kernel/np.sum(kernel)
+
+  # find center of kernel
+  n_kernel_lt0 = len(np.where(kernel_x<0)[0])
+  n_kernel_gt0 = len(np.where(kernel_x>0)[0])
+
+  if n_kernel_lt0< n_kernel_gt0:
+    origin = 0
+  else:
+    origin=-1
+
+  # convolve
+  lowRes = ndi.convolve(y, kernel, origin=origin)
+  return lowRes
+###
