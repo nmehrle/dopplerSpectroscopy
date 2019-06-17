@@ -968,8 +968,14 @@ def generateFakeSignal(data, wavelengths, unitRVs, barycentricCorrection,
 
       injectedSignal (2d-array): If returnInjection, returns fakeSignal+data
   '''
+
+  # To mimick the different spacing, we apply a mean filter across the fakeSignal and then interpolate it down to the observation wavelength grid
+  # Similar to binning on wavelength grid, better than straight interpolation
+  spacingDifference = int(np.round(getSpacing(wavelengths)/getSpacing(fakeSignalWave)))
+  averagedFakeSignal = ndi.generic_filter(fakeSignalData, np.mean, spacingDifference)
+
   # Interpolate the fake signal over it's wavelengths
-  signalInterp = interpolate.splrep(fakeSignalWave, fakeSignalData)
+  signalInterp = interpolate.splrep(fakeSignalWave, averagedFakeSignal)
 
   # Generate the fake planet velocities over this observation
   velocities = fakeKp * unitRVs + barycentricCorrection/unitPrefix + fakeVsys
