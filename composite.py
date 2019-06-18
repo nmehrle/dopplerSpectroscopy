@@ -129,6 +129,8 @@ def xcorAnalysis(obs, kpRange,
 
 #-- Sysrem Optimizing
 def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
+                  plotDetection=False, savePrefix=None,
+                  saveData=False, returnSigMat=False,
                   # Preparation
                   doVarianceWeight=True,
                   # XCor Analysis KWs
@@ -140,7 +142,6 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                     rowByRow=False, byPercentiles=False,
                   # Report Detection Strength KWs
                     kpSearchExtent=2, vsysSearchExtent=4,
-                    plotDetection=False, savePrefix=None,
                     plotKpExtent=40, plotVsysExtent=40,
                     detectionUnitStr='km/s',
                     showDetectionPlots=False,
@@ -181,6 +182,7 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
   if savePrefix is None:
     saveName = None
   else:
+    savePrefix = makePaths(savePrefix)
     saveName = savePrefix + 'sysIt_'+str(iteration)+'.png'
 
   detStrength, detCoords = theCopy.reportDetectionStrength(targetKp=targetKp,
@@ -198,11 +200,28 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                                            title=titleStr,
                                            saveName=saveName)
 
-  return detStrength, detCoords, theCopy.unNormedSigMat, theCopy.crossCorVels
+  if saveData:
+    if savePrefix is None:
+      raise valueError('savePrefix must be specified to save data.')
+    else:
+      saveDataName = savePrefix+'sysIt_'+str(iteration)+'.pickle'
+    dataToSave = {}
+    dataToSave['sigMat'] = theCopy.unNormedSigMat
+    dataToSave['kpr'] = kpRange
+    dataToSave['ccvs'] = theCopy.crossCorVels
+
+    pickle.dump(dataToSave, open(saveDataName,'wb'))
+
+  if returnSigMat:
+    return detStrength, detCoords, theCopy.unNormedSigMat, theCopy.crossCorVels
+
+  else:
+    return detStrength, detCoords
 
 def reportSysremIterations(obs, kpRange,
-                  maxIterations=10,
-                  cores=1,
+                  maxIterations=10, cores=1,
+                  plotDetection=False, savePrefix=None,
+                  saveData=False, returnSigMats=False,
                   # Prepare Data KWs
                     doAutoTrimCols=True,
                     plotTrim=False,
@@ -235,7 +254,6 @@ def reportSysremIterations(obs, kpRange,
                     rowByRow=False, byPercentiles=False,
                   # Report Detection Strength KWs
                     kpSearchExtent=2, vsysSearchExtent=4,
-                    plotDetection=False, savePrefix=None,
                     plotKpExtent=50, plotVsysExtent=80,
                     detectionUnitStr='km/s',
                     showDetectionPlots=True,
@@ -293,12 +311,18 @@ def reportSysremIterations(obs, kpRange,
 
   detectionStrengths = []
   detectionCoords    = []
-  iterativeSigMats   = []
-  crossCorVels       = []
+  if returnSigMats:
+    iterativeSigMats   = []
+    crossCorVels       = []
+
   partialReport = partial(reportOnSingleSysremIteration,
                           obs=obs,
                           allSysremData=allSysremData,
                           kpRange=kpRange,
+                          plotDetection=plotDetection,
+                          savePrefix=savePrefix,
+                          saveData=saveData,
+                          returnSigMat=returnSigMats,
                           doVarianceWeight=doVarianceWeight,
                           # XCor Analysis KWs
                             # Generate XCM
@@ -312,8 +336,6 @@ def reportSysremIterations(obs, kpRange,
                           # Report Detection Strength KWs
                             kpSearchExtent=kpSearchExtent,
                             vsysSearchExtent=vsysSearchExtent,
-                            plotDetection=plotDetection,
-                            savePrefix=savePrefix,
                             plotKpExtent=plotKpExtent,
                             plotVsysExtent=plotVsysExtent,
                             detectionUnitStr=detectionUnitStr,
@@ -336,12 +358,18 @@ def reportSysremIterations(obs, kpRange,
       seq = tqdm(seq, desc='Calculating Detection Strengths')
 
     for iteration in seq:
-      detStrength, detCoords, sigMat, ccvs = partialReport(iteration)
+      if returnSigMats:
+        detStrength, detCoords, sigMat, ccvs = partialReport(iteration)
+
+        iterativeSigMats.append(sigMat)
+        crossCorVels.append(ccvs)
+
+      else:
+        detStrength, detCoords = partialReport(iteration)
 
       detectionStrengths.append(detStrength)
       detectionCoords.append(detCoords)
-      iterativeSigMats.append(sigMat)
-      crossCorVels.append(ccvs)
+
   else:
     # Cores is not 1 -> want to use multiprocessing
     if verbose:
@@ -352,19 +380,27 @@ def reportSysremIterations(obs, kpRange,
 
     # return seq
     for detVals in seq:
-      detStrength, detCoords, sigMat, ccvs = detVals
+      if returnSigMats:
+        detStrength, detCoords, sigMat, ccvs = detVals
+
+        iterativeSigMats.append(sigMat)
+        crossCorVels.append(ccvs)
+      else:
+        detStrength, detCoords = detVals
 
       detectionStrengths.append(detStrength)
       detectionCoords.append(detCoords)
-      iterativeSigMats.append(sigMat)
-      crossCorVels.append(ccvs)
+      
       if verbose:
         pbar.update()
 
     if verbose:
       pbar.close()
 
-  return detectionStrengths, detectionCoords, iterativeSigMats, crossCorVels
+  if returnSigMats:
+    return detectionStrengths, detectionCoords, iterativeSigMats, crossCorVels
+  else:
+    return detectionStrengths, detectionCoords
 ###
 
 #-- Injection/Recovery
@@ -373,6 +409,7 @@ def injRec(planet, instrument, templates, dates, orders, tkp, tvs, kpr, exps,
   '''
   '''
   outVels = [-200,200]
+  makePaths(topSaveDir)
   for tem in tqdm(templates,desc='templates'):
     for date in tqdm(dates,desc=tem+': dates'):
       for order in tqdm(orders, desc=tem+' '+date+': orders'):
@@ -384,6 +421,7 @@ def injRec(planet, instrument, templates, dates, orders, tkp, tvs, kpr, exps,
         optItsPath = savePrefix+'opt/'
         makePaths(optItsPath)
         detLevels=[]
+        optItsVals=[]
 
         for exp in tqdm(exps, desc=tem+' '+date+' '+str(order)+': strengths'):
           inStrength = 10**exp
@@ -394,6 +432,7 @@ def injRec(planet, instrument, templates, dates, orders, tkp, tvs, kpr, exps,
           obs = hrsObs('jsondb.json', planet, instrument, date, order, template=tem)
           recStrengths, coords, sigMats, ccvs = reportSysremIterations(obs, kpr, 
                                                   maxIterations=8,
+                                                  kpSearchExtent=2, vsysSearchExtent=4,
                                                   doInjectSignal=True,
                                                   targetKp=tkp, targetVsys=tvs,
                                                   injectedRelativeStrength=inStrength,
@@ -403,6 +442,8 @@ def injRec(planet, instrument, templates, dates, orders, tkp, tvs, kpr, exps,
                                                   outputVelocities=outVels,
                                                   verbose=False,
                                                   savePrefix=sysItsPath,
+                                                  saveData=True,
+                                                  returnSigMats=True,
                                                   cores=10
                                                 )
 
@@ -410,9 +451,13 @@ def injRec(planet, instrument, templates, dates, orders, tkp, tvs, kpr, exps,
           sysIt = np.argmax(recStrengths)
           # copy the plot
           copyfile(sysItsPath+'sysIt_'+str(sysIt)+'.png', optItsPath+inStrengthStr+'.png')
+          # copy the data
+          copyfile(sysItsPath+'sysIt_'+str(sysIt)+'.pickle', optItsPath+inStrengthStr+'.pickle')
           # save the detection strength
           detLevels.append(recStrengths[sysIt])
+          optItsVals.append(sysIt)
 
+        # create detection levels plot
         plt.figure()
         plt.plot(detLevels)
         xtickind = 3
@@ -427,6 +472,17 @@ def injRec(planet, instrument, templates, dates, orders, tkp, tvs, kpr, exps,
 
         plt.savefig(saveTrend+'order_'+str(order)+'.png')
         plt.show()
+
+        # save detection levels data
+        detLevelSave = {}
+        detLevelSave['detLevels'] = detLevels
+        detLevelSave['optIts'] = optItsVals
+        detLevelSave['planet'] = planet
+        detLevelSave['date'] = date
+        detLevelSave['order'] = order
+        detLevelSave['template'] = tem
+        detLevelSave['exps'] = exps
+        pickle.dump(detLevelSave,open(saveTrend+'order_'+str(order)+'.pickle','wb'))
 
 # def dateInjRec(planet, instrument, tem, dates, orders, tkp, tvs, kpr, exps,
                # sysIts=[]):
