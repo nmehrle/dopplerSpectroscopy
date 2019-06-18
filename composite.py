@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 
 from scipy import ndimage as ndi
 from scipy import interpolate
+from shutil import copyfile
+
 
 from pathos.multiprocessing import ProcessingPool as Pool
 from functools import partial
@@ -72,12 +74,13 @@ def prepareData(obs,
                  verbose=verbose)
 
   if doRemoveLFTrends:
+    # After generate Mask?
     obs.removeLowFrequencyTrends(nTrends=nTrends)
 
   if doInjectSignal:
-    print('---------------------------------')
-    print('----- Injecting Fake Signal -----')
-    print('---------------------------------')
+    # print('---------------------------------')
+    # print('----- Injecting Fake Signal -----')
+    # print('---------------------------------')
 
     obs.injectFakeSignal(injectedKp=injectedKp, injectedVsys=injectedVsys,
                           relativeStrength=injectedRelativeStrength,
@@ -120,7 +123,8 @@ def xcorAnalysis(obs, kpRange,
 
   obs.generateSigMat(kpRange, unitPrefix=unitPrefix, outputVelocities=outputVelocities, verbose=verbose)
 
-  obs.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
+  if doNormalizeSigMat:
+    obs.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
 ###
 
 #-- Sysrem Optimizing
@@ -194,7 +198,7 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                                            title=titleStr,
                                            saveName=saveName)
 
-  return detStrength, detCoords, theCopy.unNormedSigMat
+  return detStrength, detCoords, theCopy.unNormedSigMat, theCopy.crossCorVels
 
 def reportSysremIterations(obs, kpRange,
                   maxIterations=10,
@@ -232,17 +236,17 @@ def reportSysremIterations(obs, kpRange,
                   # Report Detection Strength KWs
                     kpSearchExtent=2, vsysSearchExtent=4,
                     plotDetection=False, savePrefix=None,
-                    plotKpExtent=60, plotVsysExtent=80,
+                    plotKpExtent=50, plotVsysExtent=80,
                     detectionUnitStr='km/s',
-                    showDetectionPlots=False,
-                    closeDetectionPlots=True,
+                    showDetectionPlots=True,
+                    closeDetectionPlots=False,
                     detectionTitle='',
                     clim=[None,None],
                     cmap='viridis',
                     figsize=None,
                   # General
                     targetKp=None, targetVsys=None,
-                    unitPrefix=1000, verbose=False
+                    unitPrefix=1000, verbose=True
 ):
   '''
     Given a hrsObs object, performs the data preparation and analysis,
@@ -290,6 +294,7 @@ def reportSysremIterations(obs, kpRange,
   detectionStrengths = []
   detectionCoords    = []
   iterativeSigMats   = []
+  crossCorVels       = []
   partialReport = partial(reportOnSingleSysremIteration,
                           obs=obs,
                           allSysremData=allSysremData,
@@ -331,11 +336,12 @@ def reportSysremIterations(obs, kpRange,
       seq = tqdm(seq, desc='Calculating Detection Strengths')
 
     for iteration in seq:
-      detStrength, detCoords, sm = partialReport(iteration)
+      detStrength, detCoords, sigMat, ccvs = partialReport(iteration)
 
       detectionStrengths.append(detStrength)
       detectionCoords.append(detCoords)
-      iterativeSigMats.append(sm)
+      iterativeSigMats.append(sigMat)
+      crossCorVels.append(ccvs)
   else:
     # Cores is not 1 -> want to use multiprocessing
     if verbose:
@@ -346,20 +352,83 @@ def reportSysremIterations(obs, kpRange,
 
     # return seq
     for detVals in seq:
-      detStrength, detCoords, sm = detVals
+      detStrength, detCoords, sigMat, ccvs = detVals
 
       detectionStrengths.append(detStrength)
       detectionCoords.append(detCoords)
-      iterativeSigMats.append(sm)
+      iterativeSigMats.append(sigMat)
+      crossCorVels.append(ccvs)
       if verbose:
         pbar.update()
 
     if verbose:
       pbar.close()
 
-  return detectionStrengths, detectionCoords
+  return detectionStrengths, detectionCoords, iterativeSigMats, crossCorVels
 ###
 
 #-- Injection/Recovery
+def injRec(planet, instrument, templates, dates, orders, tkp, tvs, kpr, exps,
+           topSaveDir = 'tests/injRec/'):
+  '''
+  '''
+  outVels = [-200,200]
+  for tem in tqdm(templates,desc='templates'):
+    for date in tqdm(dates,desc=tem+': dates'):
+      for order in tqdm(orders, desc=tem+' '+date+': orders'):
 
+        injLocStr = str(tkp)+'_'+str(tvs)
+        savePrefix = topSaveDir+injLocStr+'/'+tem+'/'+date+'/order_'+str(order)+'/'
+        makePaths(savePrefix)
+
+        optItsPath = savePrefix+'opt/'
+        makePaths(optItsPath)
+        detLevels=[]
+
+        for exp in tqdm(exps, desc=tem+' '+date+' '+str(order)+': strengths'):
+          inStrength = 10**exp
+          inStrengthStr = '10e%.1f'%exp
+          sysItsPath = savePrefix+inStrengthStr+'/'
+          makePaths(sysItsPath)
+
+          obs = hrsObs('jsondb.json', planet, instrument, date, order, template=tem)
+          recStrengths, coords, sigMats, ccvs = reportSysremIterations(obs, kpr, 
+                                                  maxIterations=8,
+                                                  doInjectSignal=True,
+                                                  targetKp=tkp, targetVsys=tvs,
+                                                  injectedRelativeStrength=inStrength,
+                                                  plotDetection=True,
+                                                  showDetectionPlots=True,
+                                                  closeDetectionPlots=True,
+                                                  outputVelocities=outVels,
+                                                  verbose=False,
+                                                  savePrefix=sysItsPath,
+                                                  cores=10
+                                                )
+
+          # record the optimal
+          sysIt = np.argmax(recStrengths)
+          # copy the plot
+          copyfile(sysItsPath+'sysIt_'+str(sysIt)+'.png', optItsPath+inStrengthStr+'.png')
+          # save the detection strength
+          detLevels.append(recStrengths[sysIt])
+
+        plt.figure()
+        plt.plot(detLevels)
+        xtickind = 3
+        plt.xticks(np.arange(len(detLevels))[::xtickind], np.round(exps[::xtickind],1))
+
+        plt.title(planet + ' -- '+date+' -- order: '+str(order)+'\n '+tem+' injection/recovery')
+        plt.ylabel('Recovered Signal Level')
+        plt.xlabel('Injected Signal Strength (log)')
+
+        saveTrend = '/'.join(savePrefix.split('/')[:-2])+'/trends/'
+        makePaths(saveTrend)
+
+        plt.savefig(saveTrend+'order_'+str(order)+'.png')
+        plt.show()
+
+# def dateInjRec(planet, instrument, tem, dates, orders, tkp, tvs, kpr, exps,
+               # sysIts=[]):
+  # print(1)
 ###
