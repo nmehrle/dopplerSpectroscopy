@@ -1384,7 +1384,10 @@ def reportDetectionStrength(sigMat, crossCorVels, kpRange,
     theTitle += ', Search Value: '+str(np.round(detectionStrength,2))
     plt.title(theTitle)
 
-    plt.ylim(np.min(kpRange),np.max(kpRange))
+    ylim = [0,0]
+    ylim[0] = np.max((plotKpLim[0], np.min(kpRange)))
+    ylim[1] = np.min((plotKpLim[1], np.max(kpRange)))
+    plt.ylim(*ylim)
 
     if saveName is not None:
       plt.savefig(saveName)
