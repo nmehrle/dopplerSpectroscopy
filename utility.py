@@ -59,6 +59,9 @@ def makePaths(path):
     Parameters:
       path (str): directory path e.g. "this/is/a/path/"
   '''
+  if path[-1] != '/':
+    path = path+'/'
+
   dirList = path.split('/')
 
   for i in range(1, len(dirList)):
@@ -67,6 +70,8 @@ def makePaths(path):
       pass
     else:
       os.mkdir(subPath)
+
+  return path
 ###
 
 #-- Object Manipulation
