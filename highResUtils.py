@@ -1,5 +1,8 @@
 import numpy as np
+
 import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
 
 from scipy import ndimage as ndi
 from scipy import signal, interpolate
@@ -1381,6 +1384,8 @@ def reportDetectionStrength(sigMat, crossCorVels, kpRange,
     theTitle += ', Search Value: '+str(np.round(detectionStrength,2))
     plt.title(theTitle)
 
+    plt.ylim(np.min(kpRange),np.max(kpRange))
+
     if saveName is not None:
       plt.savefig(saveName)
 
@@ -1510,7 +1515,7 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
   maxIndex = np.unravel_index(windowed.argmax(), windowed.shape)
   maxX = xs[maxIndex[1]]
   maxY = ys[maxIndex[0]]
-  plt.scatter(maxX, maxY, color='k', marker='P',s=50)
+  plt.scatter(maxX, maxY, color='k', marker='X',s=60)
   maxValStr = 'Max Value: ' + str(np.round(windowed[maxIndex],2)) + \
                 ': (' + str(np.round(maxX,1)) + ',' + \
                 str(int(np.round(maxY,0))) + ')'
@@ -1622,4 +1627,42 @@ def plotData(data, xAxis=None, yAxis=None, xlabel='Index', ylabel='Index',
     plt.savefig(saveName)
 
   plt.show()
+
+def plotTemplateVsOrders(templateWave, templateFlux, orderWaves,
+                         orderNames = None, xlabel='Wavelength (um)',
+                         title='', saveName=None,
+                         y_bottom=.2, height = .1, padRatio=.03):
+  plt.figure()
+
+  templateFlux = normalize(templateFlux)
+  plt.plot(templateWave, templateFlux, color='K',alpha=0.5)
+
+  pad = (np.max(orderWaves) - np.min(orderWaves))*padRatio
+  plt.xlim(np.min(orderWaves)-pad, np.max(orderWaves)+pad)
+
+  if np.ndim(orderWaves==1):
+    orderWaves = [orderWaves]
+
+  if orderNames is None:
+    orderNames = list(map(str, np.arange(len(orderWaves))))
+
+  rects = []
+  for i, waveband in enumerate(orderWaves):
+    width = np.max(waveband) - np.min(waveband)
+    rects.append(Rectangle((np.min(waveband),y_bottom), width, height))
+    plt.text(np.min(waveband)+2*padRatio*width, y_bottom+2*padRatio*height,
+             orderNames[i], zorder=20, fontweight='bold')
+
+
+  plt.gca().add_collection(PatchCollection(rects, zorder=10))
+
+  plt.title(title)
+  plt.xlabel(xlabel)
+  plt.ylabel('Normalized Flux')
+
+  if saveName is not None:
+    plt.savefig(saveName)
+  
+  plt.show()
+
 ###
