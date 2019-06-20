@@ -3,10 +3,13 @@ import numpy as np
 import os
 
 from scipy import ndimage as ndi
-from scipy import constants, optimize, interpolate
+from scipy import optimize, interpolate
 
 from astropy.io import fits
 from astropy.time import Time
+from astropy import units as u
+from astropy.modeling.blackbody import blackbody_lambda
+from astropy import constants
 
 import barycorrpy
 from barycorrpy.utils import get_stellar_data
@@ -541,7 +544,7 @@ def doppler(wave, v, wavelengthFrame='observed', unitPrefix=1):
       correctedWavelengths (float or array): The wavelengths seen in the other frame
   '''
   # Get speed of light in correct units
-  c = constants.c / unitPrefix
+  c = constants.c.value / unitPrefix
 
   # Adjust for wavelengthFrame
   # Note that entering observed wavelengths is the same as entering source wavelengths by with 
@@ -582,7 +585,7 @@ def inverseDoppler(observedWave, sourceWave, unitPrefix=1):
   beta = (A - 1)/(A + 1)
 
   # calculate c in correct units
-  c = constants.c / unitPrefix
+  c = constants.c.value / unitPrefix
   v = beta * c
 
   return v
@@ -640,4 +643,117 @@ def reduceSpectralResolution(x, y, R_low, R_high=None, lambda_mid=None, n=4):
   # convolve
   lowRes = ndi.convolve(y, kernel, origin=origin)
   return lowRes
+
+def equilibriumTemperature(P, T_star, R_star, M_star):
+  '''
+    Given planet period, stellar parameters, calculates the equlibrium temperature for the planet.
+
+    Parameters:
+      P - days
+      T_star - Kelvin
+      R_star - Solar Radii
+      M_star - Solar Mass
+
+    Returns:
+      T_eq - planet equlibrium temperature
+  '''
+
+  T_eq = 344.67 * (T_star/1000) * (R_star)**(1/2) * M_star**(-1/6) * P**(-1/3)
+  return T_eq
+
+def assertUnits(x, x_units, x_default=None):
+  # check if x has units
+  try:
+    x.unit
+  except AttributeError:
+    # x needs units
+
+    # if x_units is a unit, put it on
+    # hacky way to check if x_units is a unit
+    if 'astropy.units.core' in str(type(x_units)):
+      x = x * x_units
+
+    # if x_units is numeric, use that as prefix to x_default
+    elif isinstance(x_units, int) or isinstance(x_units, float):
+      if x_default is None:
+        raise ValueError("If x_units is numeric, x_default must be astropy.unit")
+
+      x = x * x_default * x_units
+
+    else:
+      raise TypeError("x must have units, or x_unit must be either a int/float/astropy.unit")
+
+  return x
+
+
+
+def blackbody(w, T, w_units=u.micron):
+  '''
+    Returns the spectral radiance per unit wavelength (B_lambda) for a blackbody at temperature T, 
+    over wavelengths w. Wrapper for astropy.modelinig.blackbody.blackbody_lambda
+
+    Parameters:
+      w (float or array): wavelengths to evalualte B_lambda over
+
+      T (float): Temperature of blackbody
+
+      w_units (float or astropy.units.core.Unit): Units of wavelength
+        If float, considered as prefix relative to meters i.e.
+          1 - meters
+          10e-6 - microns
+          10e-9 - nanometers
+
+    Returns:
+      B_lambda (same as w): spectral radiance per unit wavelength for input wavelengths
+          units: erg cm^-2 s^-1 Angstrom^-1
+  '''
+
+  # assert w has units
+  w = assertUnits(w, w_units, u.m)
+
+  return blackbody_lambda(w, T)
+
+def getBlackBodyFlux(T, w=None, w_units=u.micron):
+  '''
+  '''
+
+  # if no wavelength specified, run stefan boltzmann eq
+  if w is None:
+
+    # Check if T has units, or else apply kelvin
+    try:
+      T.unit
+    except AttributeError:
+      # T needs units
+
+      T = T*u.Kelvin
+
+    flux = constants.sigma_sb * T
+
+  # Wavelength region specified - integrate blackbody radiance times pi
+  else:
+    # assert first w has units
+    w = assertUnits(w, w_units, u.m)
+
+    radiancePerW = blackbody(w, T) #erg / AA / s/ cm^2
+
+    w_AA = w.to(u.Angstrom)
+    radiance = np.trapz(radiancePerW, w_AA) #erg s^-1 cm^-2 sr^-1
+    flux = radiance * np.pi * u.sr
+
+  return flux
+
+def getBlackBodyLuminosity(T, R, w=None, w_units=u.micron, R_units=u.R_sun):
+  '''
+  '''
+
+  flux = getBlackBodyFlux(T, w, w_units)
+
+  # Assert units of R
+  R = assertUnits(R, R_units, u.R_sun)
+
+  luminosity = flux * np.pi * (R**2)
+  return luminosity
+
+
 ###
