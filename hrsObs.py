@@ -171,8 +171,14 @@ class hrsObs:
       raise FileNotFoundError('Template File "'+str(templateFile)+'" not found.')
 
     self._template = value
-    self.templateWave = templateData['wavelengths']/templateUnits
-    self.templateFlux = templateData['flux']
+
+    try:
+      self.templateWave = templateData['wavelengths']/templateUnits
+      self.templateFlux = templateData['flux']
+    except IndexError:
+      # template was .csv format
+      self.templateWave = templateData[:,0]/templateUnits
+      self.templateFlux = templateData[:,1]
 
     self.templateResolution = self.templateDB[value]['resolution']
     if self.templateResolution == 0:
@@ -877,12 +883,13 @@ class hrsObs:
     '''
     if outputVelocities is None:
       sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
-                                self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose)
+                                self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose,
+                                xValsIsVelocity=False)
     else:
       sigMat, limitedVelocities = hru.generateSigMat(self.xcm, kpRange, self.wavelengths,
                                 self.getRVs(unitRVs=True), self.barycentricCorrection,
                                 outputVelocities=outputVelocities, returnXcorVels=True,
-                                unitPrefix=unitPrefix, verbose=verbose)
+                                xValsIsVelocity=False, unitPrefix=unitPrefix, verbose=verbose)
       self.crossCorVels = limitedVelocities
 
     self.kpRange = kpRange

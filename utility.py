@@ -30,9 +30,9 @@ else:
   from tqdm import tqdm
 
 #-- File I˚/O
-def readFile(dataFile):
+def readFile(dataFile, delimiter=','):
   '''
-    Reads data from file. Currently supports fits, pickle
+    Reads data from file. Currently supports fits, pickle, csv
 
     Parameters:
       dataFile (str) : Path to datafile to read
@@ -50,8 +50,10 @@ def readFile(dataFile):
     except UnicodeDecodeError:
       with open(dataFile, 'rb') as f:
         data = pickle.load(f, encoding='latin1')
+  elif extension == 'csv':
+    data = np.loadtxt(dataFile,delimiter=delimiter)
   else:
-    raise ValueError('Error reading "'+dataFile+'" Currently only fits and pickle are supported')
+    raise ValueError('Error reading "'+dataFile+'" Currently only fits pickle and csv are supported')
 
   return data
 
@@ -450,7 +452,8 @@ def rowNorm(data):
   # w = w-180 equal to rv = -rv
   # switch to rv = -rv
 def getRV(times, t0=0, P=0, w_deg=0, e=0, inc = 90, Kp=1, v_sys=0,
-        vectorizeFSolve = False, returnPhase=False, **kwargs
+        vectorizeFSolve = False, returnPhase=False, returnPhaseAndRV=False,
+        **kwargs
 ):
   """
   Computes RV from given model, barycentric velocity
@@ -498,6 +501,9 @@ def getRV(times, t0=0, P=0, w_deg=0, e=0, inc = 90, Kp=1, v_sys=0,
 
   # Apply inclination
   velocity = velocity * np.sin(np.deg2rad(inc))
+
+  if returnPhaseAndRV:
+    return velocity, mean_anomaly/(2*np.pi)
 
   return velocity
 
@@ -754,6 +760,5 @@ def getBlackBodyLuminosity(T, R, w=None, w_units=u.micron, R_units=u.R_sun):
 
   luminosity = flux * np.pi * (R**2)
   return luminosity
-
 
 ###
