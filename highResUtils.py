@@ -1168,10 +1168,10 @@ def addMatricies(matricies, xAxes, outputXAxis):
   summed = np.sum(summed,0)
   return summed
 
-def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
+def generateSigMat(xcm, kpRange, xVals, unitRVs,
                    barycentricCorrection, unitPrefix=1,
                    outputVelocities=None, returnXcorVels=False,
-                   verbose=False
+                   xValsIsVelocity=False, verbose=False
 ):
   '''
     Generates a significanceMatrix sigMat by aligning a cross correlation matrix to orbital solutions with
@@ -1184,7 +1184,8 @@ def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
 
       kpRange (1d-array): List of Kp values to check when checking orbital solutions
 
-      wavelengths (1d-array): Wavelengths of data used to generate xcm
+      xVals (1d-array): Either: Wavelengths of data used to generate xcm
+                            or: X axis of XCM in Velocity space (if this, set xValsIsVelocity=True)
 
       unitRVs (1d-array): RV values normalized so Kp = 1, vsys=0
 
@@ -1211,7 +1212,10 @@ def generateSigMat(xcm, kpRange, wavelengths, unitRVs,
 
       xcorVelocities (array): Array of velocities forming x-axis for SigMat
   '''
-  xcorVelocities = getCrossCorrelationVelocity(wavelengths, unitPrefix=unitPrefix)
+  if xValsIsVelocity:
+    xcorVelocities = xVals
+  else:
+    xcorVelocities = getCrossCorrelationVelocity(xVals, unitPrefix=unitPrefix)
 
   # Convert XCM to spline representation for faster calculation
   xcorInterps    = [interpolate.splrep(xcorVelocities, ccf) for ccf in xcm]
