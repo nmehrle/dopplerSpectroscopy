@@ -130,7 +130,7 @@ def xcorAnalysis(obs, kpRange,
 #-- Sysrem Optimizing
 def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                   plotDetection=False, savePrefix=None,
-                  saveData=False, returnSigMat=False,
+                  doSaveData=False, returnSigMat=False,
                   # Preparation
                   doVarianceWeight=True,
                   # XCor Analysis KWs
@@ -152,6 +152,7 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                     figsize=None,
                   # General
                     targetKp=None, targetVsys=None,
+                    injectedRelativeStrength=None,
                     unitPrefix=1000, verbose=False
 ):
   '''
@@ -200,17 +201,19 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                                            title=titleStr,
                                            saveName=saveName)
 
-  if saveData:
+  if doSaveData:
     if savePrefix is None:
       raise valueError('savePrefix must be specified to save data.')
     else:
-      saveDataName = savePrefix+'sysIt_'+str(iteration)+'.pickle'
-    dataToSave = {}
-    dataToSave['sigMat'] = theCopy.unNormedSigMat
-    dataToSave['kpr'] = kpRange
-    dataToSave['ccvs'] = theCopy.crossCorVels
+      saveDataName = savePrefix+'sysIt_'+str(iteration)
 
-    pickle.dump(dataToSave, open(saveDataName,'wb'))
+    saveDict = {}
+    saveDict['sysremIterations'] = iteration
+    injectedStr = f'10e{np.log10(injectedRelativeStrength):.1f}'
+    saveData(theCopy.unNormedSigMat, saveDataName, kpRange, theCopy.crossCorVels,
+             theCopy.planet, theCopy.instrument, theCopy.template, theCopy.date,
+             theCopy.order, targetKp, targetVsys, saveDict,
+             injectedStr=injectedStr, doPlot=False)
 
   if returnSigMat:
     return detStrength, detCoords, theCopy.unNormedSigMat, theCopy.crossCorVels
@@ -221,7 +224,7 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
 def reportSysremIterations(obs, kpRange,
                   maxIterations=10, cores=1,
                   plotDetection=False, savePrefix=None,
-                  saveData=False, returnSigMats=False,
+                  doSaveData=False, returnSigMats=False,
                   # Prepare Data KWs
                     doAutoTrimCols=True,
                     plotTrim=False,
@@ -328,7 +331,7 @@ def reportSysremIterations(obs, kpRange,
                           kpRange=kpRange,
                           plotDetection=plotDetection,
                           savePrefix=savePrefix,
-                          saveData=saveData,
+                          doSaveData=doSaveData,
                           returnSigMat=returnSigMats,
                           doVarianceWeight=doVarianceWeight,
                           # XCor Analysis KWs
@@ -355,6 +358,7 @@ def reportSysremIterations(obs, kpRange,
                           # General
                             targetKp=targetKp,
                             targetVsys=targetVsys,
+                            injectedRelativeStrength=injectedRelativeStrength,
                             unitPrefix=unitPrefix,
                             verbose=superVerbose
                   )
@@ -412,7 +416,7 @@ def reportSysremIterations(obs, kpRange,
 
 #-- Injection/Recovery
 def injRec(planet, instruments, templates, dates, orders, tkp, tvs, kpr, exps,
-           topSaveDir = 'plots/injRec/', normalizeXCM=False, **kwargs):
+           topSaveDir = 'plots/injRec/', normalizeXCM=True, **kwargs):
   '''
   '''
   outVels = [-220,220]
@@ -469,7 +473,7 @@ def injRec(planet, instruments, templates, dates, orders, tkp, tvs, kpr, exps,
               outputVelocities=outVels,
               verbose=False,
               savePrefix=sysItsPath,
-              saveData=True,
+              doSaveData=True,
               returnSigMats=True,
               normalizeXCM=normalizeXCM,
               cores=10,
@@ -519,7 +523,7 @@ def injRec(planet, instruments, templates, dates, orders, tkp, tvs, kpr, exps,
 
 def combineData(planet, instruments, templates, dates, orders, tkp, tvs, kpr,
                 exps, topSaveDir='plots/injRec/', outX = np.arange(-200,200,1)
-               ):
+):
   injLocStr = str(tkp)+'_'+str(tvs)
 
   # When only a single instrument is passed:
@@ -593,9 +597,10 @@ def combineData(planet, instruments, templates, dates, orders, tkp, tvs, kpr,
 
 def saveData(data, saveName, kpr, ccvs,
     planet, instrument, template, date, order,
-    tkp, tvs, injectedStr=None):
+    tkp, tvs, saveDict={}, injectedStr=None,
+    doPlot=True, xlim=[-100,100]
+):
 
-  saveDict = {}
   saveDict['sigMat'] = data
   saveDict['kpr'] = kpr
   saveDict['ccvs'] = ccvs
@@ -618,5 +623,6 @@ def saveData(data, saveName, kpr, ccvs,
 
   pickle.dump(saveDict, open(saveName+'.pickle','wb'))
 
-  hru.plotSigMat(hru.normalizeSigMat(data),ccvs,kpr,targetKp=tkp, targetVsys=tvs,
-    title= title, saveName=saveName+'.png')
+  if doPlot:
+    hru.plotSigMat(hru.normalizeSigMat(data),ccvs,kpr,targetKp=tkp, targetVsys=tvs,
+      xlim=xlim, title= title, saveName=saveName+'.png')
