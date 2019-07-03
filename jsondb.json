@@ -91,6 +91,16 @@
         "file": "upsand-noinvert.pickle",
         "units": 10000,
         "resolution": 0
+      },
+      "inverted-extended": {
+        "file": "upsand-invert-extended.csv",
+        "units": 10000,
+        "resolution": 0
+      },
+      "non-inverted-extended": {
+        "file": "upsand-noinvert-extended.csv",
+        "units": 10000,
+        "resolution": 0
       }
     },
     "instruments":{
@@ -143,6 +153,7 @@
       "ishell": {
         "observatory": "irtf",
         "dataFormat": "irtf",
+        "resolution": 70000,
         "dataPaths": {
           "dateDirectoryPrefix": "/dash/exobox/proj/pcsa/data/IRTF/proc/",
           "dateDirectorySuffix": "/",
