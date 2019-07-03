@@ -141,7 +141,7 @@ def reportOnSingleSysremIteration(iteration, obs, allSysremData, kpRange,
                     # Normalize SigMat
                     rowByRow=False, byPercentiles=False,
                   # Report Detection Strength KWs
-                    kpSearchExtent=2, vsysSearchExtent=4,
+                    kpSearchExtent=4, vsysSearchExtent=1,
                     plotKpExtent=40, plotVsysExtent=40,
                     detectionUnitStr='km/s',
                     showDetectionPlots=False,
@@ -233,6 +233,9 @@ def reportSysremIterations(obs, kpRange,
                     alignmentPadLen=None,
                     alignmentPeakHalfWidth=3,
                     alignmentUpSampFactor=1000,
+                    # LF Trends
+                    doRemoveLFTrends=False,
+                    nTrends=1,
                     #injectData
                     doInjectSignal=False,
                     injectedRelativeStrength=1/1000,
@@ -253,7 +256,7 @@ def reportSysremIterations(obs, kpRange,
                     # Normalize SigMat
                     rowByRow=False, byPercentiles=False,
                   # Report Detection Strength KWs
-                    kpSearchExtent=2, vsysSearchExtent=4,
+                    kpSearchExtent=4, vsysSearchExtent=1,
                     plotKpExtent=50, plotVsysExtent=80,
                     detectionUnitStr='km/s',
                     showDetectionPlots=True,
@@ -273,10 +276,12 @@ def reportSysremIterations(obs, kpRange,
 
     Can be done in multiprocessing if cores > 1
   '''
-
   superVerbose = (verbose>1)
 
-  obs.collectRawData()
+  try:
+    obs.wavelengths
+  except AttributeError:
+    obs.collectRawData()
   prepareData(obs, stopBeforeSysrem=True,
                     doAutoTrimCols=doAutoTrimCols, plotTrim=plotTrim,
                     colTrimFunc=colTrimFunc,
@@ -287,6 +292,8 @@ def reportSysremIterations(obs, kpRange,
                     alignmentPadLen=alignmentPadLen,
                     alignmentPeakHalfWidth=alignmentPeakHalfWidth,
                     alignmentUpSampFactor=alignmentUpSampFactor,
+                    # LF Trends:
+                    doRemoveLFTrends=doRemoveLFTrends, nTrends=nTrends,
                     #injectData
                     doInjectSignal=doInjectSignal,
                     injectedKp=targetKp, injectedVsys=targetVsys,
@@ -404,87 +411,212 @@ def reportSysremIterations(obs, kpRange,
 ###
 
 #-- Injection/Recovery
-def injRec(planet, instrument, templates, dates, orders, tkp, tvs, kpr, exps,
-           topSaveDir = 'tests/injRec/'):
+def injRec(planet, instruments, templates, dates, orders, tkp, tvs, kpr, exps,
+           topSaveDir = 'plots/injRec/', normalizeXCM=False, **kwargs):
   '''
   '''
-  outVels = [-200,200]
+  outVels = [-220,220]
+  injLocStr = str(tkp)+'_'+str(tvs)
+  topSaveDir = topSaveDir+injLocStr+'/'
   makePaths(topSaveDir)
-  for tem in tqdm(templates,desc='templates'):
-    for date in tqdm(dates,desc=tem+': dates'):
-      for order in tqdm(orders, desc=tem+' '+date+': orders'):
 
-        injLocStr = str(tkp)+'_'+str(tvs)
-        savePrefix = topSaveDir+injLocStr+'/'+tem+'/'+date+'/order_'+str(order)+'/'
-        makePaths(savePrefix)
+  # When only a single instrument is passed:
+  if type(instruments) == str:
+    instruments = [instruments]
+    dates  = [dates]
+    orders = [orders]
 
-        optItsPath = savePrefix+'opt/'
-        makePaths(optItsPath)
-        detLevels=[]
-        optItsVals=[]
+  pbarLength = np.sum(np.array(list(map(len,orders))) * list(map(len,dates)))
+  pbarLength *= len(templates) * len(exps)
 
-        for exp in tqdm(exps, desc=tem+' '+date+' '+str(order)+': strengths'):
-          inStrength = 10**exp
-          inStrengthStr = '10e%.1f'%exp
-          sysItsPath = savePrefix+inStrengthStr+'/'
-          makePaths(sysItsPath)
+  pbar = tqdm(total=pbarLength, desc='Calculating')
+
+  for tem in templates:
+
+    for i, instrument in enumerate(instruments):
+
+      for date in dates[i]:
+        for order in orders[i]:
+
+          savePrefix = topSaveDir+tem+'/'+date+'/order_'+str(order)+'/'
+          makePaths(savePrefix)
+
+          optItsPath = savePrefix+'opt/'
+          makePaths(optItsPath)
+          detLevels=[]
+          optItsVals=[]
 
           obs = hrsObs('jsondb.json', planet, instrument, date, order, template=tem)
-          recStrengths, coords, sigMats, ccvs = reportSysremIterations(obs, kpr, 
-                                                  maxIterations=8,
-                                                  kpSearchExtent=2, vsysSearchExtent=4,
-                                                  doInjectSignal=True,
-                                                  targetKp=tkp, targetVsys=tvs,
-                                                  injectedRelativeStrength=inStrength,
-                                                  plotDetection=True,
-                                                  showDetectionPlots=True,
-                                                  closeDetectionPlots=True,
-                                                  outputVelocities=outVels,
-                                                  verbose=False,
-                                                  savePrefix=sysItsPath,
-                                                  saveData=True,
-                                                  returnSigMats=True,
-                                                  cores=10
-                                                )
+          obs.collectRawData()
 
-          # record the optimal
-          sysIt = np.argmax(recStrengths)
-          # copy the plot
-          copyfile(sysItsPath+'sysIt_'+str(sysIt)+'.png', optItsPath+inStrengthStr+'.png')
-          # copy the data
-          copyfile(sysItsPath+'sysIt_'+str(sysIt)+'.pickle', optItsPath+inStrengthStr+'.pickle')
-          # save the detection strength
-          detLevels.append(recStrengths[sysIt])
-          optItsVals.append(sysIt)
+          for exp in exps:
+            inStrength = 10**exp
+            inStrengthStr = '10e%.1f'%exp
+            sysItsPath = savePrefix+inStrengthStr+'/'
+            makePaths(sysItsPath)
 
-        # create detection levels plot
-        plt.figure()
-        plt.plot(detLevels)
-        xtickind = 3
-        plt.xticks(np.arange(len(detLevels))[::xtickind], np.round(exps[::xtickind],1))
+            obsCopy = obs.copy()
+            recStrengths, coords, sigMats, ccvs = reportSysremIterations(obsCopy,
+              kpr,
+              maxIterations=8,
+              kpSearchExtent=5, vsysSearchExtent=1,
+              doInjectSignal=True,
+              targetKp=tkp, targetVsys=tvs,
+              injectedRelativeStrength=inStrength,
+              plotDetection=True,
+              showDetectionPlots=True,
+              closeDetectionPlots=True,
+              outputVelocities=outVels,
+              verbose=False,
+              savePrefix=sysItsPath,
+              saveData=True,
+              returnSigMats=True,
+              normalizeXCM=normalizeXCM,
+              cores=10,
+              **kwargs
+            )
 
-        plt.title(planet + ' -- '+date+' -- order: '+str(order)+'\n '+tem+' injection/recovery')
-        plt.ylabel('Recovered Signal Level')
-        plt.xlabel('Injected Signal Strength (log)')
+            # record the optimal
+            sysIt = np.argmax(recStrengths)
+            # copy the plot
+            copyfile(sysItsPath+'sysIt_'+str(sysIt)+'.png', optItsPath+inStrengthStr+'.png')
+            # copy the data
+            copyfile(sysItsPath+'sysIt_'+str(sysIt)+'.pickle', optItsPath+inStrengthStr+'.pickle')
+            # save the detection strength
+            detLevels.append(recStrengths[sysIt])
+            optItsVals.append(sysIt)
 
-        saveTrend = '/'.join(savePrefix.split('/')[:-2])+'/trends/'
-        makePaths(saveTrend)
+            pbar.update()
 
-        plt.savefig(saveTrend+'order_'+str(order)+'.png')
-        plt.show()
+          # create detection levels plot
+          plt.figure()
+          plt.plot(detLevels)
+          xtickind = 3
+          plt.xticks(np.arange(len(detLevels))[::xtickind], np.round(exps[::xtickind],1))
 
-        # save detection levels data
-        detLevelSave = {}
-        detLevelSave['detLevels'] = detLevels
-        detLevelSave['optIts'] = optItsVals
-        detLevelSave['planet'] = planet
-        detLevelSave['date'] = date
-        detLevelSave['order'] = order
-        detLevelSave['template'] = tem
-        detLevelSave['exps'] = exps
-        pickle.dump(detLevelSave,open(saveTrend+'order_'+str(order)+'.pickle','wb'))
+          plt.title(planet + ' -- '+date+' -- order: '+str(order)+'\n '+tem+' injection/recovery')
+          plt.ylabel('Recovered Signal Level')
+          plt.xlabel('Injected Signal Strength (log)')
 
-# def dateInjRec(planet, instrument, tem, dates, orders, tkp, tvs, kpr, exps,
-               # sysIts=[]):
-  # print(1)
-###
+          saveTrend = '/'.join(savePrefix.split('/')[:-2])+'/trends/'
+          makePaths(saveTrend)
+
+          plt.savefig(saveTrend+'order_'+str(order)+'.png')
+          plt.show()
+
+          # save detection levels data
+          detLevelSave = {}
+          detLevelSave['detLevels'] = detLevels
+          detLevelSave['optIts'] = optItsVals
+          detLevelSave['planet'] = planet
+          detLevelSave['date'] = date
+          detLevelSave['order'] = order
+          detLevelSave['template'] = tem
+          detLevelSave['exps'] = exps
+          pickle.dump(detLevelSave,open(saveTrend+'order_'+str(order)+'.pickle','wb'))
+
+  pbar.close()
+
+def combineData(planet, instruments, templates, dates, orders, tkp, tvs, kpr,
+                exps, topSaveDir='plots/injRec/', outX = np.arange(-200,200,1)
+               ):
+  injLocStr = str(tkp)+'_'+str(tvs)
+
+  # When only a single instrument is passed:
+  if type(instruments) == str:
+    instruments = [instruments]
+    dates  = [dates]
+    orders = [orders]
+
+  pbarLength = np.sum(np.array(list(map(len,orders))) * list(map(len,dates)))
+  pbarLength *= len(templates) * len(exps)
+
+  pbar = tqdm(total=pbarLength, desc='Calculating')
+
+  for exp in exps:
+    inStrength = 10**exp
+    inStrengthStr = '10e%.1f'%exp
+
+    for tem in templates:
+      # SigMats, CCVs
+      templateData = [[],[]]
+      temPath = topSaveDir+injLocStr+'/'+tem+'/'
+
+      combinedDatesPath = temPath+'combinedDates/'
+      makePaths(combinedDatesPath)
+
+      for i, instrument in enumerate(instruments):
+        instrumentData = [[],[]]
+
+        for date in dates[i]:
+          datePath = temPath+date+'/'
+
+          combinedOrdersPath = datePath+'combinedOrders/'
+          makePaths(combinedOrdersPath)
+
+          # SigMats, CCVs
+          dateData = [[],[]]
+
+          for order in orders[i]:
+            dataPath = datePath+'order_'+str(order)+'/opt/'
+            file = dataPath+inStrengthStr+'.pickle'
+
+            data = pickle.load(open(file,'rb'))
+            dateData[0].append(data['sigMat'])
+            dateData[1].append(data['ccvs'])
+
+            templateData[0].append(data['sigMat'])
+            templateData[1].append(data['ccvs'])
+
+            instrumentData[0].append(data['sigMat'])
+            instrumentData[1].append(data['ccvs'])
+
+            pbar.update()
+
+          dateData = hru.addMatricies(*dateData, outX)
+          dateSaveName = combinedOrdersPath+inStrengthStr
+
+          saveData(dateData, dateSaveName, kpr, outX, planet, instrument,
+            tem, date, orders[i], tkp, tvs, injectedStr=inStrengthStr)
+
+        instrumentData = hru.addMatricies(*instrumentData, outX)
+        instrumentSaveName = combinedDatesPath+inStrengthStr+'_'+instrument
+        saveData(instrumentData, instrumentSaveName, kpr, outX, planet,
+          instrument, tem, dates[i], orders[i], tkp, tvs, injectedStr=inStrengthStr)
+
+      templateData = hru.addMatricies(*templateData, outX)
+      temSaveName = combinedDatesPath+inStrengthStr
+      saveData(templateData, temSaveName, kpr, outX, planet, instruments,
+        tem, dates, orders, tkp, tvs, injectedStr=inStrengthStr)
+
+  pbar.close()
+
+def saveData(data, saveName, kpr, ccvs,
+    planet, instrument, template, date, order,
+    tkp, tvs, injectedStr=None):
+
+  saveDict = {}
+  saveDict['sigMat'] = data
+  saveDict['kpr'] = kpr
+  saveDict['ccvs'] = ccvs
+
+  saveDict['planet'] = planet
+  saveDict['instrument'] = instrument
+  saveDict['template'] = template
+  saveDict['date'] = date
+  saveDict['order'] = order
+  saveDict['kp'] = tkp
+  saveDict['vs'] = tvs
+
+  title = planet+' '+template
+
+  if injectedStr is not None:
+    saveDict['injectedStr'] = injectedStr
+    title+=' injected: '+injectedStr
+  title+='\ndate: '+str(date)
+  title+='\norder: '+str(order)
+
+  pickle.dump(saveDict, open(saveName+'.pickle','wb'))
+
+  hru.plotSigMat(hru.normalizeSigMat(data),ccvs,kpr,targetKp=tkp, targetVsys=tvs,
+    title= title, saveName=saveName+'.png')
