@@ -542,7 +542,7 @@ def alignment(flux, ref, iterations = 1,
                     error=shifted_error, padLen=padLen, peak_half_width=peak_half_width,
                     upSampleFactor=upSampleFactor, verbose=verbose)
 
-def removeLowFrequencyTrends(data, nTrends=1):
+def removeLowFrequencyTrends(data, nTrends=1, kernel=51, mode=0, replaceMeans=True):
   '''
     Removes the first nTrends fourier components from each spectrum in the data.
       Does not remove the 0th component (mean).
@@ -552,18 +552,32 @@ def removeLowFrequencyTrends(data, nTrends=1):
 
         nTrends (int): Number of fourier components to remove
   '''
-  corrected = []
+  if mode == 0:
+    corrected = []
 
-  for spectrum in data:
-    fourier = rfft(spectrum)
+    for spectrum in data:
+      fourier = rfft(spectrum)
 
-    for trend in range(1,nTrends+1):
-      fourier[trend] = 0
+      for trend in range(1,nTrends+1):
+        fourier[trend] = 0
 
-    correctedSpectrum =  np.fft.irfft(fourier)
-    corrected.append(correctedSpectrum[:len(spectrum)])
+      correctedSpectrum =  np.fft.irfft(fourier)
+      corrected.append(correctedSpectrum[:len(spectrum)])
 
-  return np.array(corrected)
+    return np.array(corrected)
+
+  elif mode == 1:
+    means = np.mean(data, 1)[:, np.newaxis]
+    lowFreqTrends = np.apply_along_axis(ndi.median_filter, 1, data, kernel)
+    data = data - lowFreqTrends
+
+    if replaceMeans:
+      data = data + means
+
+    return data
+
+  else:
+    raise ValueError('mode must be either 0 (fourier) or 1 (medfilt).')
 
 def normalizeData(data, normalizationScheme='divide_row', polyOrder=2):
   '''
@@ -927,10 +941,11 @@ def varianceWeighting(data, axis=-2):
 ###
 
 #-- Comparing Data to template
+# TODO - write comment
 def generateFakeSignal(data, wavelengths, unitRVs, barycentricCorrection,
                        fakeKp, fakeVsys, fakeSignalData, fakeSignalWave,
-                       relativeStrength=1/100, unitPrefix=1, returnInjection=False,
-                       verbose=False
+                       relativeStrength=None, unitPrefix=1, returnInjection=False,
+                       kernel=51, verbose=False
 ):
   '''
     Generates a fake signal from the provided orbital solution/signal data.
@@ -991,14 +1006,20 @@ def generateFakeSignal(data, wavelengths, unitRVs, barycentricCorrection,
   for vel in seq:
     # Calculate wavelengths in source frame that correspond to this observation
     sourceWave = doppler(wavelengths, vel, unitPrefix=unitPrefix)
-
-    # Assemble array of normalized spectra
-    thisFlux = normalize(interpolate.splev(sourceWave, signalInterp))
+    thisFlux = interpolate.splev(sourceWave, signalInterp)
     fakeSignal.append(thisFlux)
 
-  # Multiply each normalized spectra by the median of the real flux observed at that time
-  # and the relative signal strength
-  fakeSignal = np.array(fakeSignal) * np.median(data, 1)[:,np.newaxis] * relativeStrength
+  lowFreqTrends = np.apply_along_axis(signal.medfilt, 1, data, kernel)
+  channelFraction = lowFreqTrends / np.max(lowFreqTrends,1)[:,np.newaxis]
+
+  fluxFraction = np.median(data,1)
+  fluxFraction = fluxFraction/np.max(fluxFraction)
+
+  fakeSignal = fakeSignal - np.median(fakeSignal,1)[:,np.newaxis]
+  fakeSignal = fakeSignal * channelFraction
+  fakeSignal = fakeSignal * fluxFraction[:,np.newaxis]
+
+  fakeSignal = fakeSignal * relativeStrength
 
   if returnInjection:
     return fakeSignal+data
@@ -1168,6 +1189,13 @@ def addMatricies(matricies, xAxes, outputXAxis):
   summed = np.sum(summed,0)
   return summed
 
+def generateAlignedXCM(xcm, kpRange, xVals, unitRVs,
+                   barycentricCorrection, unitPrefix=1,
+                   outputVelocities=None, returnXcorVels=False,
+                   xValsIsVelocity=False, verbose=False
+):
+  print(1)
+
 def generateSigMat(xcm, kpRange, xVals, unitRVs,
                    barycentricCorrection, unitPrefix=1,
                    outputVelocities=None, returnXcorVels=False,
@@ -1235,10 +1263,12 @@ def generateSigMat(xcm, kpRange, xVals, unitRVs,
         upperBound = upperBound + 1
 
       xcorVelocities = xcorVelocities[lowerBound:upperBound]
+      trimmedXCM     = xcm[:, lowerBound:upperBound]
 
     else:
       # Use this as the output velocity range
       xcorVelocities = outputVelocities
+      trimmedXCM = [interpolate.splev(xcorVelocities, xci) for xci in xcorInterps]
 
   seq = kpRange
   if verbose:
@@ -1254,7 +1284,8 @@ def generateSigMat(xcm, kpRange, xVals, unitRVs,
     sigMat.append(sigMatRow)
 
   if returnXcorVels:
-    return np.array(sigMat), xcorVelocities
+    trimmedXCM = np.array(trimmedXCM)
+    return np.array(sigMat), xcorVelocities, trimmedXCM
 
   return np.array(sigMat)
 

@@ -1,4 +1,5 @@
 import json
+import copy
 
 from utility import *
 import highResUtils as hru
@@ -148,6 +149,8 @@ class hrsObs:
       del self.template
       return
 
+    self.updateDatabase()
+
     try:
       templateFile = self.templateDB['directory'] + self.templateDB[value]['file']
     except AttributeError:
@@ -215,7 +218,7 @@ class hrsObs:
       # Try and make value copies of each attribute in self
       # When unable (e.g. for a string attribute) calling .copy() is unneccessary
       try:
-        setattr(theCopy, k, v.copy())
+        setattr(theCopy, k, copy.deepcopy(v))
       except AttributeError:
         setattr(theCopy, k, v)
 
@@ -311,7 +314,7 @@ class hrsObs:
     if self.date is not None:
       try:
         database = database['dates'][self.date]
-      except KeyError:
+      except (KeyError, TypeError):
         raise KeyError('Date '+str(self.date)+' not found for planet "'+str(self.planet)+'", instrument "'+str(self.instrument)+'".')
       self.database = database
 
@@ -328,7 +331,7 @@ class hrsObs:
         self.orderLevelKeywords = database['orders'][str(self.order)]
       except KeyError:
         # This order is not in the database, print warning
-        warnings.warn('No order level keywords found for planet "'+str(self.planet)+'", instrument "'+str(self.instrument)+'", date "'+str(self.date)+'", order: '+str(self.order)+'.')
+        # warnings.warn('No order level keywords found for planet "'+str(self.planet)+'", instrument "'+str(self.instrument)+'", date "'+str(self.date)+'", order: '+str(self.order)+'.')
         self.orderLevelKeywords = {}
 
       del self.database
@@ -519,6 +522,19 @@ class hrsObs:
     rvs = getRV(self.times, **orbParams)
 
     return rvs
+
+  def getPhases(self):
+    return getRV(self.times, **self.orbParams, returnPhase=True)
+
+  def getTemplateInterp(self):
+    interpolatedTemplate = interpolateData(self.templateFlux, self.templateWave, self.wavelengths, ext=2)
+    return interpolatedTemplate
+
+  def getNominalKp(self):
+    return self.orbParams['Kp']
+
+  def getNominalVsys(self):
+    return self.orbParams['v_sys']
   ###
 
   #-- Processing Data
@@ -612,9 +628,9 @@ class hrsObs:
 
     self.log.append('Trimmed')
 
-  def alignData(self, iterations=1, padLen=None,
-                peak_half_width=3, upSampleFactor=1000,
-                verbose=False
+  def alignData(self, iterations=1, ref=None, refNum=None,
+                padLen=None, peak_half_width=3,
+                upSampleFactor=1000, verbose=False
   ):
     '''
       Aligns the data to the wavelength solution of the spectrum with the highest SNR. 
@@ -630,9 +646,14 @@ class hrsObs:
             of the returned centers (i.e. an upSampleFactor of 10 can find peaks to a 0.1 precision level)
     '''
 
-    highSNR   = hru.getHighestSNR(self.data, self.error)
+    if ref is None:
+      if refNum is None:
+        highSNR = hru.getHighestSNR(self.data, self.error)
+        ref = self.data[highSNR]
+      else:
+        ref = np.mean(self.data[:refNum],0)
 
-    data, error = hru.alignment(self.data, self.data[highSNR],
+    data, error = hru.alignment(self.data, ref,
                         iterations=iterations,
                         error=self.error, padLen=padLen,
                         peak_half_width=peak_half_width,
@@ -644,7 +665,7 @@ class hrsObs:
 
     self.log.append('Aligned')
 
-  def removeLowFrequencyTrends(self, nTrends=1):
+  def removeLowFrequencyTrends(self, nTrends=1, kernel=51, mode=0, replaceMeans=True):
     '''
       Removes the first nTrends fourier components from each spectrum in the data.
       Does not remove the 0th component (mean).
@@ -652,8 +673,13 @@ class hrsObs:
       Parameters:
         nTrends (int): Number of fourier components to remove
     '''
-    self.data = hru.removeLowFrequencyTrends(self.data, nTrends=nTrends)
-    self.log.append(str(nTrends)+" low freq trends removed")
+    self.data = hru.removeLowFrequencyTrends(self.data, nTrends=nTrends,
+      kernel=kernel, mode=mode, replaceMeans=replaceMeans)
+    if mode == 0:
+      self.log.append(str(nTrends)+" low freq trends removed")
+
+    elif mode == 1:
+      self.log.append(f'HighPass filter of width {kernel} applied')
 
   def normalizeData(self, normalizationScheme='divide_row', polyOrder=2):
     '''
@@ -772,6 +798,7 @@ class hrsObs:
     data = hru.sysrem(self.data, self.error, nCycles=nCycles, verbose=verbose, returnAll=False)
 
     self.data = data
+    self.sysremIterations = nCycles
     self.log.append('Sysrem: '+str(nCycles)+' cycles')
 
   def varianceWeight(self):
@@ -783,7 +810,9 @@ class hrsObs:
   ###
 
   #-- Comparing to Template
-  def injectFakeSignal(self, injectedKp, injectedVsys, relativeStrength, unitPrefix=1000, verbose=False):
+  def injectFakeSignal(self, injectedKp, injectedVsys, relativeStrength,
+    subtract=False, unitPrefix=1000, verbose=False
+  ):
     '''
       Injects the template signal into the data at the specified location and strength.
 
@@ -793,6 +822,8 @@ class hrsObs:
         injectedVsys (float): Vsys of fake planet for injection.
 
         relativeStrength (float): Amplitude of template features relative to median of data
+
+        subtract (bool): If true, subtracts the generated signal from data
 
         unitPrefix (float): Units of velocity divided by meter/second. (Velocity units of injectedKp, injectedVsys)
         i.e. unitPrefix = 1000 implies velocity is in km/s
@@ -807,15 +838,27 @@ class hrsObs:
     obsMedW = np.median(self.wavelengths)
 
     lowResTemplate = reduceSpectralResolution(self.templateWave, self.templateFlux, self.resolution,
-                                              R_template, obsMedW) 
+                                              R_template, obsMedW)
 
     fakeSignal = hru.generateFakeSignal(self.data, self.wavelengths, self.getRVs(unitRVs=True),
                                         self.barycentricCorrection, injectedKp, injectedVsys, lowResTemplate,
                                         self.templateWave, relativeStrength=relativeStrength,
-                                        unitPrefix=unitPrefix, verbose=verbose, returnInjection=True)
+                                        unitPrefix=unitPrefix, verbose=verbose, returnInjection=False)
 
-    self.data = fakeSignal
-    self.log.append('Injected Fake Signal at '+np.format_float_scientific(relativeStrength))
+    if subtract:
+      newData = self.data - fakeSignal
+      self.log.append('Subtracted Signal at '+np.format_float_scientific(relativeStrength))
+
+    else:
+      newData = self.data + fakeSignal
+      self.log.append('Injected Fake Signal at '+np.format_float_scientific(relativeStrength))
+
+    self.data = newData
+    self.injection = {}
+    self.injection['Kp'] = injectedKp
+    self.injection['Vsys'] = injectedVsys
+    self.injection['subtract'] = subtract
+    self.injection['relativeStrength'] = relativeStrength
 
   def generateXCM(self, normalizeXCM=True, unitPrefix=1000, xcorMode='same', verbose=False):
     '''
@@ -852,9 +895,13 @@ class hrsObs:
 
     self.xcm = hru.generateXCM(self.data, interpolatedTemplate, normalizeXCM=normalizeXCM,
                                 xcorMode=xcorMode, verbose=verbose)
+    self.unTrimmedXCM = self.xcm.copy()
 
     # Generate XCor velocities now to allow for plotting XCM, even though they'll be generated later too
     self.crossCorVels = hru.getCrossCorrelationVelocity(self.wavelengths, unitPrefix=unitPrefix)
+    self.unTrimmedXCV = self.crossCorVels.copy()
+
+    self.log.append('XCM Generated')
 
   def generateSigMat(self, kpRange, unitPrefix=1000,
                      outputVelocities=None,
@@ -882,19 +929,23 @@ class hrsObs:
         verbose (bool): Whether or not to progressbar
     '''
     if outputVelocities is None:
-      sigMat = hru.generateSigMat(self.xcm, kpRange, self.wavelengths, self.getRVs(unitRVs=True),
-                                self.barycentricCorrection, unitPrefix=unitPrefix, verbose=verbose,
-                                xValsIsVelocity=False)
+      sigMat = hru.generateSigMat(self.xcm, kpRange, self.crossCorVels,
+        self.getRVs(unitRVs=True), self.barycentricCorrection, unitPrefix=unitPrefix,
+        verbose=verbose, xValsIsVelocity=True)
     else:
-      sigMat, limitedVelocities = hru.generateSigMat(self.xcm, kpRange, self.wavelengths,
-                                self.getRVs(unitRVs=True), self.barycentricCorrection,
-                                outputVelocities=outputVelocities, returnXcorVels=True,
-                                xValsIsVelocity=False, unitPrefix=unitPrefix, verbose=verbose)
+      sigMat, limitedVelocities, trimmedXCM = hru.generateSigMat(self.xcm, kpRange,
+        self.crossCorVels, self.getRVs(unitRVs=True), self.barycentricCorrection,
+        outputVelocities=outputVelocities, returnXcorVels=True,
+        xValsIsVelocity=True, unitPrefix=unitPrefix, verbose=verbose)
+
       self.crossCorVels = limitedVelocities
+      self.xcm = trimmedXCM
 
     self.kpRange = kpRange
     self.sigMat = sigMat
     self.unNormedSigMat = sigMat.copy()
+
+    self.log.append('SigMat Generated')
 
   def reNormalizeSigMat(self, rowByRow=False, byPercentiles=False):
     '''
@@ -914,9 +965,13 @@ class hrsObs:
     '''
     sigMat = hru.normalizeSigMat(self.unNormedSigMat, rowByRow=rowByRow, byPercentiles=byPercentiles)
     self.sigMat = sigMat
+    logStr = f'SigMat Normalized, rowByRow: {rowByRow}, byPercentiles: {byPercentiles}'
+    self.log.append(logStr)
 
   def reportDetectionStrength(self, targetKp=None, targetVsys=None,
                               kpSearchExtent=2, vsysSearchExtent=4,
+                              unNormedSigMat=False, rowByRow=False,
+                              byPercentiles=False,
                               plotResult=False, saveName=None,
                               plotKpExtent=40, plotVsysExtent=50,
                               clim=[None,None], title='',
@@ -986,8 +1041,14 @@ class hrsObs:
     # caused by calling this function in a multiprocessing context.
     # Do not delete
     print('',end='')
+
+    if unNormedSigMat:
+      sm = self.unNormedSigMat
+    else:
+      sm = hru.normalizeSigMat(self.unNormedSigMat, rowByRow=rowByRow, byPercentiles=byPercentiles)
+
     detectionStrength, detectionCoords = hru.reportDetectionStrength(
-                                            self.sigMat, self.crossCorVels, self.kpRange,
+                                            sm, self.crossCorVels, self.kpRange,
                                             targetKp, targetVsys, kpSearchExtent=kpSearchExtent,
                                             vsysSearchExtent=vsysSearchExtent, plotResult=plotResult,
                                             saveName=saveName, plotKpExtent=plotKpExtent,

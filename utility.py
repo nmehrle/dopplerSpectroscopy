@@ -1,6 +1,7 @@
 import pickle
 import numpy as np
 import os
+import copy
 
 from scipy import ndimage as ndi
 from scipy import optimize, interpolate
@@ -29,7 +30,7 @@ if type_of_script() == 'jupyter':
 else:
   from tqdm import tqdm
 
-#-- File I˚/O
+#-- File I/O
 def readFile(dataFile, delimiter=','):
   '''
     Reads data from file. Currently supports fits, pickle, csv
@@ -71,10 +72,10 @@ def makePaths(path):
 
   for i in range(1, len(dirList)):
     subPath = '/'.join(dirList[:i])
-    if os.path.exists(subPath):
-      pass
-    else:
+    try:
       os.mkdir(subPath)
+    except FileExistsError:
+      pass
 
   return path
 ###
@@ -102,6 +103,56 @@ def dictDepth(d, level=0, empty=1):
   elif not isinstance(d, dict) or not d:
     return level
   return max(dictDepth(d[k], level + 1) for k in d)
+
+def createNestedDict(*keyLists, innerDict={}):
+  '''
+    creates a nested dictionary from a list of keyLists
+    each key list creates a layer in the dictionary
+
+    e.g.
+    keyLists = (['a','b'], ['1','2'],['#'])
+
+    output:
+      { 'a': {
+          1: {
+            '#': {}
+          },
+          2: {
+            '#': {}
+          }
+        },
+        'b': {
+          1: {
+            '#': {}
+          },
+          2: {
+            '#': {}
+          }
+        },
+      }
+  '''
+  
+
+  last = keyLists[-1]
+  rest = keyLists[:-1]
+  
+  outerDict = {}
+  for key in last:
+    outerDict[key] = copy.deepcopy(innerDict)
+
+  if len(rest) == 0:
+    return outerDict
+
+  return createNestedDict(*rest, innerDict=outerDict)
+
+def collapseDict(theDict):
+  keys = list(theDict.keys())
+  if len(keys) == 1:
+    theDict = theDict[keys[0]]
+  else:
+    return theDict
+
+  return collapseDict(theDict)
 ###
 
 #-- Math
@@ -451,8 +502,9 @@ def rowNorm(data):
   # phase func
   # w = w-180 equal to rv = -rv
   # switch to rv = -rv
-def getRV(times, t0=0, P=0, w_deg=0, e=0, inc = 90, Kp=1, v_sys=0,
+def getRV(times, t0=0, P=0, w_deg=0, e=0, Kp=1, v_sys=0,
         vectorizeFSolve = False, returnPhase=False, returnPhaseAndRV=False,
+        inputPhases=False,
         **kwargs
 ):
   """
@@ -464,16 +516,18 @@ def getRV(times, t0=0, P=0, w_deg=0, e=0, inc = 90, Kp=1, v_sys=0,
       # t, t0, P must be same units
   :param w_deg : Argument of periastron
       # degrees
-  :param inc   : inclination
-      #degrees
   :param Kp     : Planets Orbital Velocity
   :param v_sys : Velocity of System
       # K, v_sys must be same unit
       # Output will be in this unit
   :return: radial velocity
   """
-  w = np.deg2rad(w_deg-180)
-  mean_anomaly = ((2*np.pi)/P * (times - t0)) % (2*np.pi)
+  if inputPhases:
+    mean_anomaly = times * (2*np.pi)
+
+  else:
+    w = np.deg2rad(w_deg-180)
+    mean_anomaly = ((2*np.pi)/P * (times - t0)) % (2*np.pi)
 
   if returnPhase:
     return mean_anomaly/(2*np.pi)
@@ -498,9 +552,6 @@ def getRV(times, t0=0, P=0, w_deg=0, e=0, inc = 90, Kp=1, v_sys=0,
   # TODO
   # velocity = Kp * (np.cos(true_anomaly+w) + e*np.cos(w)) + v_sys
   velocity = Kp * (np.cos(true_anomaly+w) + e*np.cos(w))
-
-  # Apply inclination
-  velocity = velocity * np.sin(np.deg2rad(inc))
 
   if returnPhaseAndRV:
     return velocity, mean_anomaly/(2*np.pi)

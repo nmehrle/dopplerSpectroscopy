@@ -1,11 +1,11 @@
 {
   "wasp-33": {
     "orbitalParamters": {
-          "Kp": 239,
+          "Kp": 225,
           "P": 1.21986967,
           "e": 0,
           "t0": 2454590.17936,
-          "v_sys": -1.5,
+          "v_sys": -6,
           "w_deg": 90,
           "inc"  : 90
     },
@@ -14,6 +14,11 @@
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
       "default": {
         "file": "wasp33.pickle",
+        "units": 10000,
+        "resolution": 0
+      },
+      "negative": {
+        "file": "wasp33_negative.pickle",
         "units": 10000,
         "resolution": 0
       }
