@@ -8,6 +8,7 @@ import copy
 from hrsObs import *
 from utility import *
 import highResUtils as hru
+import messenger
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -326,6 +327,7 @@ def saveSysremDictionaries(allSysremDicts,
   injectedKp=None, injectedVsys=None,
   targetKp=None, targetVsys=None,
   sysremSaveName=None, sysremComment=None,
+  explicitSaveDir=None,
 
   creatingData=True, extraKeys=None,
 ):
@@ -360,14 +362,18 @@ def saveSysremDictionaries(allSysremDicts,
 
       if injectionTemplate is None:
         injectionTemplate = templates[0]
-      saveDir = topDirs[injectionTemplate]+getInjectionStrengthString(injectionStrength, asPath=True)
-      if not creatingData:
-        if not os.path.isdir(saveDir):
-          print(f"Warning: directory {saveDir} does not exist, no data written")
-          continue
 
-      saveDir = saveDir+f'target_{targetKp}_{targetVsys}/'
-      makePaths(saveDir)
+      print(explicitSaveDir)
+      if explicitSaveDir is None:
+        saveDir = topDirs[injectionTemplate]+getInjectionStrengthString(injectionStrength, asPath=True)
+        if not creatingData:
+          if not os.path.isdir(saveDir):
+            print(f"Warning: directory {saveDir} does not exist, no data written")
+            continue
+        saveDir = saveDir+f'target_{targetKp}_{targetVsys}/'
+        makePaths(saveDir)
+      else:
+        saveDir = explicitSaveDir
 
       if sysremSaveName is None:
         sysremSaveName='sysrem'
@@ -385,6 +391,7 @@ def saveData(data, saveName, kpr, ccvs,
   tkp, tvs, saveDict={}, injectedStr=None,
   doPlot=True, xlim=[-100,100],
 
+  normalize=True,
   normalizeRowByRow=False,
   normalizeByPercentiles=False
 ):
@@ -413,9 +420,12 @@ def saveData(data, saveName, kpr, ccvs,
   pickle.dump(saveDict, f)
   f.close()
 
+  if normalize:
+    data = hru.normalizeSigMat(data,
+        byPercentiles=normalizeByPercentiles, rowByRow=normalizeRowByRow)
+
   if doPlot:
-    hru.plotSigMat(hru.normalizeSigMat(data,
-        byPercentiles=normalizeByPercentiles, rowByRow=normalizeRowByRow),
+    hru.plotSigMat(data,
       ccvs,kpr,targetKp=tkp, targetVsys=tvs,
       xlim=xlim, title= title, saveName=saveName+'.png')
 ###
@@ -865,7 +875,7 @@ def generateSysremLandscape(planet, templates, instruments, dates, orders,
   kpSearchExtent=5, vsysSearchExtent=1,
   sysremSaveName=None, sysremComment=None,
 
-  outputVelocities=[-250,250],
+  outputVelocities=[-500,500],
   maxIterations=8, normalizeXCM=True,
   doRemoveLFTrends=None,
   **kwargs
@@ -966,6 +976,7 @@ def calculateOptimizedSysrem(planet, templates, instruments, dates, orders,
 
   saveOutput=True,
   sysremComment=None, sysremSaveName=None,
+  explicitSaveDir=None,
 
   useUnNormalized=False,
   useRowByRow=False,
@@ -1044,7 +1055,7 @@ def calculateOptimizedSysrem(planet, templates, instruments, dates, orders,
       injectedKp=injectedKp, injectedVsys=injectedVsys,
       targetKp=targetKp, targetVsys=targetVsys,
       sysremSaveName=sysremSaveName, sysremComment=sysremComment,
-      creatingData=False
+      creatingData=False, explicitSaveDir=explicitSaveDir
       )
     pbar.close()
 
@@ -1066,7 +1077,7 @@ def applyNewTemplate(planet, newTemplates, instruments, dates, orders,
   sysremSaveName=None, sysremComment=None,
   excludeZeroIterations=True,
 
-  outputVelocities=[-250,250],
+  outputVelocities=[-500,500],
   normalizeXCM=True,
   **kwargs
 ):
@@ -1167,11 +1178,13 @@ def combineData(planet, templates, instruments, dates, orders,
   targetKp=None, targetVsys=None,
   filePrefix='sysIt_', fileSuffix='.pickle',
   saveDatesAndInstrs=False,
-  outputVelocities=np.arange(-100,100),
+  outputVelocities=np.arange(-500,500),
   dbName='jsondb.json',
 
+  normalize=True,
   normalizeByPercentiles=False,
   normalizeRowByRow=False,
+  doPlot=True,
   **kwargs
 ):
   newInputs = setupInputs(dbName, planet,
@@ -1271,8 +1284,10 @@ def combineData(planet, templates, instruments, dates, orders,
               planet, instrument, template, date, orders[i],
               targetKp, targetVsys, injectedStr=injectedStr,
               saveDict={"sysrem": thisSysremDict},
+              normalize=normalize,
               normalizeRowByRow=normalizeRowByRow,
-              normalizeByPercentiles=normalizeByPercentiles)
+              normalizeByPercentiles=normalizeByPercentiles,
+              doPlot=doPlot)
 
         if saveDatesAndInstrs:
           instrumentData = hru.addMatricies(*instrumentData, outputVelocities)
@@ -1284,9 +1299,11 @@ def combineData(planet, templates, instruments, dates, orders,
           saveData(instrumentData, instrumentSaveName, obs.kpRange, outputVelocities,
             planet, instrument, template, dates[i], orders[i],
             targetKp, targetVsys, injectedStr=injectedStr,
-            saveDict={"sysrem": sysremDict},
+            saveDict={"sysrem": thisSysremDict},
+            normalize=normalize,
             normalizeRowByRow=normalizeRowByRow,
-            normalizeByPercentiles=normalizeByPercentiles)
+            normalizeByPercentiles=normalizeByPercentiles,
+            doPlot=doPlot)
 
       templateData = hru.addMatricies(*templateData, outputVelocities)
 
@@ -1299,9 +1316,11 @@ def combineData(planet, templates, instruments, dates, orders,
       saveData(templateData, templateSaveName, obs.kpRange, outputVelocities,
           planet, instruments, template, dates, orders,
           targetKp, targetVsys, injectedStr=injectedStr,
-          saveDict={"sysrem": sysremDict},
+          saveDict={"sysrem": thisSysremDict},
+          normalize=normalize,
           normalizeRowByRow=normalizeRowByRow,
-          normalizeByPercentiles=normalizeByPercentiles)
+          normalizeByPercentiles=normalizeByPercentiles,
+          doPlot=doPlot)
 
   pbar.close()
 
@@ -1388,7 +1407,7 @@ def makeLargeXCM(planet, templates, instruments, dates, orders,
 
 
 def hi(planet, templates, instruments, dates, orders,
-  topSaveDir, kpRange, outputVelocities = np.arange(-100,100),
+  topSaveDir, kpRange, outputVelocities = np.arange(-500,500),
   injectionStrengths=None,
   targetKp=None, targetVsys=None,
   sysremFile='sysrem',
@@ -1489,3 +1508,69 @@ def hi(planet, templates, instruments, dates, orders,
 
       copyfile(injTopDir+f'/combined/{template}.png', templateDir+inStrengthStr[:-1]+'.png') 
 ###
+
+def falsePositiveTest(planet, templates, instruments, dates, orders, topSaveDir,
+  kpRange, targetVsysRange, messageAtEnd=False, verbose=False
+):
+  fpDir = topSaveDir+'noInject/fptest/'
+  sysremDir = fpDir+'sysrem/'
+  makePaths(sysremDir)
+
+  if verbose:
+    seq = tqdm(targetVsysRange, desc='Vsys Range: ')
+  else:
+    seq = targetVsysRange
+  for targetVsys in seq:
+    fileSaveName = f'tv_{targetVsys}'
+
+    calculateOptimizedSysrem(planet, templates, instruments, dates, orders,
+      topSaveDir, targetVsys=targetVsys, sysremSaveName=fileSaveName,
+      explicitSaveDir=sysremDir)
+
+    combineData(planet, templates, instruments, dates, orders, topSaveDir,
+      targetVsys=targetVsys, doPlot=False, saveName=fpDir,
+      explicitSavePath=True, saveString=fileSaveName,
+      sysremSaveName=sysremDir+fileSaveName+'.pickle',
+      explicitSysremFile=True)
+
+  if messageAtEnd:
+    messenger.sms('Done with False Positive test.')
+
+def analyzeFalsePositiveTest(planet, templates, instruments, dates, orders, topSaveDir, normalizeRowByRow=True, dbName='jsondb.json',
+  kpSearchExtent=10, vsysSearchExtent=1,
+  makeMovie=False,
+):
+  fileDir = topSaveDir+'noInject/fptest/'
+
+  reportedStrengths = []
+
+  files = os.listdir(fileDir)
+  tvRange = []
+  for f in files:
+    try:
+      n = int(f.split('_')[1].split('.')[0])
+      tvRange.append(n)
+    except IndexError:
+      pass
+
+  tvRange.sort()
+  for tv in tvRange:
+    fn = fileDir+f'tv_{tv}.pickle'
+    with open(fn, 'rb') as f:
+      data = pickle.load(f)
+
+    sigMat = data['sigMat']
+    ccvs = data['ccvs']
+    kpr = data['kpr']
+
+    normalizedSigMat = hru.normalizeSigMat(sigMat, rowByRow=normalizeRowByRow)
+    report = hru.reportDetectionStrength(normalizedSigMat, ccvs, kpr,
+      targetKp=getExpectedOrbParams(dbName, planet)[0],
+      targetVsys=tv,
+      kpSearchExtent=kpSearchExtent,
+      vsysSearchExtent=vsysSearchExtent)
+    reportedStrengths.append(report[0])
+
+  if makeMovie:
+    print(1)
+  return tvRange, reportedStrengths

@@ -1,6 +1,7 @@
 import numpy as np
 
 import matplotlib.pyplot as plt
+import seaborn as sns
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
 
@@ -593,18 +594,18 @@ def normalizeData(data, normalizationScheme='divide_row', polyOrder=2):
       'polynomial': subtract a best fit polynomial of order 'polyOrder'
   '''
   if normalizationScheme == 'subtract_col':
-    data = data-np.mean(data,1)[:,np.newaxis]
+    data = data-np.median(data,1)[:,np.newaxis]
   elif normalizationScheme == 'subtract_row':
-    data = data-np.mean(data,0)
+    data = data-np.median(data,0)
   elif normalizationScheme == 'subtract_all':
-    data = data-np.mean(data,0)
-    data = data-np.mean(data,1)[:,np.newaxis]
+    data = data-np.median(data,0)
+    data = data-np.median(data,1)[:,np.newaxis]
   elif normalizationScheme == 'divide_col':
-    data = data / np.mean(data,1)[:,np.newaxis]
+    data = data / np.median(data,1)[:,np.newaxis]
   elif normalizationScheme == 'divide_row':
-    data = data / np.mean(data,0)
+    data = data / np.median(data,0)
   elif normalizationScheme == 'divide_all':
-    data = data / (np.mean(data,0) * np.mean(data,1)[:,np.newaxis])
+    data = data / (np.median(data,0) * np.median(data,1)[:,np.newaxis])
   elif normalizationScheme == 'continuum':
     data = polynomialSubtract(data, polyOrder)
   else:
@@ -1501,7 +1502,7 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
                targetKp=None, targetVsys=None,
                xlim=[-100,100], ylim=None, clim=[None,None],
                figsize=None, cmap='viridis',
-               title='', saveName=None,
+               title='', simplePlot=False, saveName=None,
                unitStr='km/s', show=True
 ):
   '''
@@ -1537,6 +1538,7 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
 
       show (bool): if True, calls plt.show()
   '''
+  sns.set()
 
   windowed, xs, ys = windowData(sigMat, crossCorVels, kpRange, xlim, ylim)
 
@@ -1553,7 +1555,8 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
   maxIndex = np.unravel_index(windowed.argmax(), windowed.shape)
   maxX = xs[maxIndex[1]]
   maxY = ys[maxIndex[0]]
-  plt.scatter(maxX, maxY, color='k', marker='X',s=60)
+  if not simplePlot:
+    plt.scatter(maxX, maxY, color='k', marker='X',s=60)
   maxValStr = 'Max Value: ' + str(np.round(windowed[maxIndex],2)) + \
                 ': (' + str(np.round(maxX,1)) + ',' + \
                 str(int(np.round(maxY,0))) + ')'
@@ -1576,13 +1579,16 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
   plt.axis('tight')
 
   plt.xlabel('Systemic Velocity ('+str(unitStr)+')')
+  pltXMax = np.max(pltXs)
+  pltXMin = np.min(pltXs)
   plt.ylabel('Kp ('+str(unitStr)+')')
   cbar.set_label('Sigma')
 
   # format title
   if title!='' and title[-1] != '\n':
     title+='\n'
-  plt.title(title + maxValStr + targetStr)
+  if not simplePlot:
+    plt.title(title + maxValStr + targetStr)
 
   # Change mouseover events on jupyter to also show Z values
   def fmt(x, y):

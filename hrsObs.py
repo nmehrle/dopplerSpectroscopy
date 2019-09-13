@@ -891,7 +891,7 @@ class hrsObs:
     '''
     # Interpolate template onto detector wavelengths.
     # If detector wavelength is not in template wavelengths, throw an error
-    interpolatedTemplate = interpolateData(self.templateFlux, self.templateWave, self.wavelengths, ext=2)
+    interpolatedTemplate = self.getTemplateInterp()
 
     self.xcm = hru.generateXCM(self.data, interpolatedTemplate, normalizeXCM=normalizeXCM,
                                 xcorMode=xcorMode, verbose=verbose)
