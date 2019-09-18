@@ -1498,12 +1498,13 @@ def windowData(data, xs, ys, xlim=None, ylim=None):
 
   return windowed, windowXs, windowYs
 
-def plotSigMat(sigMat, crossCorVels, kpRange,
+def plotSigMat(sigMat=None, crossCorVels=None, kpRange=None,
                targetKp=None, targetVsys=None,
                xlim=[-100,100], ylim=None, clim=[None,None],
                figsize=None, cmap='viridis',
                title='', simplePlot=False, saveName=None,
-               unitStr='km/s', show=True
+               unitStr='km/s', show=True,
+               **kwargs
 ):
   '''
     plots a given significance Matrix, marks the maximum value in the specified range.
@@ -1538,6 +1539,10 @@ def plotSigMat(sigMat, crossCorVels, kpRange,
 
       show (bool): if True, calls plt.show()
   '''
+
+  if sigMat is None or crossCorVels is None or kpRange is None:
+    raise(ValueError('SigMat, crossCorVels and kpRange must all be defined.'))
+
   sns.set()
 
   windowed, xs, ys = windowData(sigMat, crossCorVels, kpRange, xlim, ylim)
