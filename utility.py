@@ -78,6 +78,10 @@ def makePaths(path):
       pass
 
   return path
+
+def pickleOpen(fn):
+  with open(fn,'rb') as f:
+    return pickle.load(f)
 ###
 
 #-- Object Manipulation
