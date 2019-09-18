@@ -811,7 +811,7 @@ class hrsObs:
 
   #-- Comparing to Template
   def injectFakeSignal(self, injectedKp, injectedVsys, relativeStrength,
-    subtract=False, unitPrefix=1000, verbose=False
+    unitPrefix=1000, verbose=False
   ):
     '''
       Injects the template signal into the data at the specified location and strength.
@@ -822,8 +822,6 @@ class hrsObs:
         injectedVsys (float): Vsys of fake planet for injection.
 
         relativeStrength (float): Amplitude of template features relative to median of data
-
-        subtract (bool): If true, subtracts the generated signal from data
 
         unitPrefix (float): Units of velocity divided by meter/second. (Velocity units of injectedKp, injectedVsys)
         i.e. unitPrefix = 1000 implies velocity is in km/s
@@ -845,19 +843,13 @@ class hrsObs:
                                         self.templateWave, relativeStrength=relativeStrength,
                                         unitPrefix=unitPrefix, verbose=verbose, returnInjection=False)
 
-    if subtract:
-      newData = self.data - fakeSignal
-      self.log.append('Subtracted Signal at '+np.format_float_scientific(relativeStrength))
-
-    else:
-      newData = self.data + fakeSignal
-      self.log.append('Injected Fake Signal at '+np.format_float_scientific(relativeStrength))
+    newData = self.data + fakeSignal
+    self.log.append('Injected Fake Signal at '+np.format_float_scientific(relativeStrength))
 
     self.data = newData
     self.injection = {}
     self.injection['Kp'] = injectedKp
     self.injection['Vsys'] = injectedVsys
-    self.injection['subtract'] = subtract
     self.injection['relativeStrength'] = relativeStrength
 
   def generateXCM(self, normalizeXCM=True, unitPrefix=1000, xcorMode='same', verbose=False):
