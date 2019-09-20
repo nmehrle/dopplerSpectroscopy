@@ -224,7 +224,7 @@ def setupInputs(dbName, planet, templates, instruments, dates, orders,
       injectionStrengths = [injectionStrengths]
 
     if creatingData:
-      # Asert that doInjectSignal and injectionStrengths match:
+      # Assert that doInjectSignal and injectionStrengths match:
       if injectionStrengths is None:
         raise ValueError('Injection Strengths must be specified for doInjectSignal==True')
     else:
@@ -319,7 +319,6 @@ def getObsList(planet, templates, instruments, dates, orders,
             obsList.append(obsData)
   return obsList
 
-
 # todo
 def saveSysremDictionaries(allSysremDicts,
   templates, topDirs,
@@ -363,7 +362,6 @@ def saveSysremDictionaries(allSysremDicts,
       if injectionTemplate is None:
         injectionTemplate = templates[0]
 
-      print(explicitSaveDir)
       if explicitSaveDir is None:
         saveDir = topDirs[injectionTemplate]+getInjectionStrengthString(injectionStrength, asPath=True)
         if not creatingData:
@@ -1510,9 +1508,11 @@ def hi(planet, templates, instruments, dates, orders,
 ###
 
 def falsePositiveTest(planet, templates, instruments, dates, orders, topSaveDir,
-  kpRange, targetVsysRange, messageAtEnd=False, verbose=False
+  kpRange, targetVsysRange, messageAtEnd=False, verbose=False,
+  diradd = 'fptest/',
+  kpSearchExtent=5, vsysSearchExtent=1, outputVelocities=np.arange(-500,500)
 ):
-  fpDir = topSaveDir+'noInject/fptest/'
+  fpDir = topSaveDir+'noInject/'+diradd
   sysremDir = fpDir+'sysrem/'
   makePaths(sysremDir)
 
@@ -1525,22 +1525,24 @@ def falsePositiveTest(planet, templates, instruments, dates, orders, topSaveDir,
 
     calculateOptimizedSysrem(planet, templates, instruments, dates, orders,
       topSaveDir, targetVsys=targetVsys, sysremSaveName=fileSaveName,
-      explicitSaveDir=sysremDir)
+      explicitSaveDir=sysremDir, kpSearchExtent=kpSearchExtent, vsysSearchExtent=vsysSearchExtent)
 
     combineData(planet, templates, instruments, dates, orders, topSaveDir,
       targetVsys=targetVsys, doPlot=False, saveName=fpDir,
       explicitSavePath=True, saveString=fileSaveName,
       sysremSaveName=sysremDir+fileSaveName+'.pickle',
-      explicitSysremFile=True)
+      explicitSysremFile=True, outputVelocities=outputVelocities)
 
   if messageAtEnd:
     messenger.sms('Done with False Positive test.')
 
-def analyzeFalsePositiveTest(planet, templates, instruments, dates, orders, topSaveDir, normalizeRowByRow=True, dbName='jsondb.json',
+def analyzeFalsePositiveTest(planet, templates, instruments, dates, orders, topSaveDir, normalize=True,
+  normalizeRowByRow=True, normalizeByPercentiles=True,
+  dbName='jsondb.json', diradd='fptest/',
   kpSearchExtent=10, vsysSearchExtent=1,
-  makeMovie=False,
+  makeMovie=False
 ):
-  fileDir = topSaveDir+'noInject/fptest/'
+  fileDir = topSaveDir+'noInject/'+diradd
 
   reportedStrengths = []
 
@@ -1563,7 +1565,11 @@ def analyzeFalsePositiveTest(planet, templates, instruments, dates, orders, topS
     ccvs = data['ccvs']
     kpr = data['kpr']
 
-    normalizedSigMat = hru.normalizeSigMat(sigMat, rowByRow=normalizeRowByRow)
+    if normalize:
+      normalizedSigMat = hru.normalizeSigMat(sigMat, 
+        rowByRow=normalizeRowByRow, byPercentiles=normalizeByPercentiles)
+    else:
+      normalizedSigMat = sigMat
     report = hru.reportDetectionStrength(normalizedSigMat, ccvs, kpr,
       targetKp=getExpectedOrbParams(dbName, planet)[0],
       targetVsys=tv,
