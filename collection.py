@@ -67,7 +67,7 @@ class Collection:
 
     # Unless an injection is specified, assume noInject
     self.injectedSignal = False
-    self.injectionStrengths = [None]
+    self.injectionStrength = None
     self.injectionKp = None
     self.injectionVsys = None
     self.injectionTemplate = None
@@ -95,6 +95,8 @@ class Collection:
     
 
     self.topDir = self.rootDir + 'noInject/'
+    self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
+
     self.setObsList()
 
   @property
@@ -111,6 +113,8 @@ class Collection:
       self.autoSetTargetKp = False
       self._targetKp = value
 
+    self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
+
   @property
   def targetVsys(self):
     return self._targetVsys
@@ -124,6 +128,8 @@ class Collection:
     else:
       self.autoSetTargetVsys = False
       self._targetVsys = value
+
+    self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
 
   def autoSetTargetParams(self):
     needsExpectedKp = self.autoSetTargetKp and (self.injectionKp is None)
@@ -144,11 +150,12 @@ class Collection:
       else:
         self._targetVsys = self.injectionVsys
 
-  def setInjection(self, injectionKp, injectionVsys, injectionStrengths=None):
+  def setInjection(self, injectionKp, injectionVsys, injectionStrength=1):
     self.injectedSignal = True
     self.injectionKp = injectionKp
     self.injectionVsys = injectionVsys
     self.injectionTemplate = self.template
+    self.injectionStrength = injectionStrength
 
     if self.autoSetTargetKp:
       self._targetKp = injectionKp
@@ -156,62 +163,46 @@ class Collection:
     if self.autoSetTargetVsys:
       self._targetVsys = injectionVsys
 
-    topDir = self.topDir
-    if injectionStrengths is None:
-      # will lookup injection strengths from directory
-      injectionStrengths = []
-      try:
-        for subPath in os.listdir(topDir):
-          if os.path.isdir(topDir+subPath):
-            injectionStrengths.append(subPath)
-      except FileNotFoundError as e:
-        raise FileNotFoundError(f"Path {topDir} does not exist, try specifying injectionStrengths")
-
-      if injectionStrengths == []:
-        raise ValueError(f'No injectionStrengths found for {topDir}, need to specify injectionStrength.')
-
-    else:
-      if isinstance(injectionStrengths, (float,int,str)):
-        injectionStrengths = [injectionStrengths]
-
     topDir = self.rootDir + f'inject_{self.template}/'+str(injectionKp)+'_'+str(injectionVsys)+'/'
+    topDir = topDir + getInjectionString(injectionStrength, asPath=True)
     self.topDir = topDir
-    self.injectionStrengths = injectionStrengths
-
-    pbarLength = np.sum(np.array(list(map(len,self.orders))) * list(map(len,self.dates)))
-    pbarLength *= len(injectionStrengths)
-    self.pbarLength = pbarLength
+    self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
 
     self.setObsList()
 
   def clearInjection(self):
     self.injectedSignal = False
-    self.injectionStrengths = [None]
+    self.injectionStrength = None
+    self.injectionTemplate = None
     self.injectionKp = None
     self.injectionVsys = None
 
     self.autoSetTargetParams()
 
+    self.topDir = self.rootDir + 'noInject/'
+    self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
+
+    self.setObsList()
+
   def setObsList(self):
     obsList = []
 
-    for injectionStrength in self.injectionStrengths:
-      for i, instrument in enumerate(self.instruments):
-        for date in self.dates[i]:
-          for order in self.orders[i]:
-            path = getObsDataPath(self.template, date, order, injectionStrength, self.topDir)
-            obsData = {
-              "planet": self.planet,
-              "template": self.template,
-              "instrument": instrument,
-              "date": date,
-              "order": order,
-              "injectionStrength": injectionStrength,
-              "topDir": self.topDir,
-              "path": path
-            }
+    for i, instrument in enumerate(self.instruments):
+      for date in self.dates[i]:
+        for order in self.orders[i]:
+          path = getObsDataPath(self.template, date, order, self.topDir)
+          obsData = {
+            "planet": self.planet,
+            "template": self.template,
+            "instrument": instrument,
+            "date": date,
+            "order": order,
+            "injectionStrength": self.injectionStrength,
+            "topDir": self.topDir,
+            "path": path
+          }
 
-            obsList.append(obsData)
+          obsList.append(obsData)
 
     self.obsList = obsList
 
@@ -222,6 +213,8 @@ class Collection:
     if targetVsys is not None:
       self.targetVsys = targetVsys
 
+    self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
+
   def getTarget(self):
     return self.targetKp, self.targetVsys
 
@@ -231,12 +224,26 @@ class Collection:
     del testObs
     return ret
 
-  def getTargetPath(self, injectionStrength=None):
-    if injectionStrength is None:
-      injectionStrength = self.injectionStrengths[0]
-    return getTargetPath(self.targetKp, self.targetVsys, injectionStrength, self.topDir)
+  def getInjectionStrengths(self):
+    injectionStrengths = []
+    try:
+      for subPath in os.listdir(self.topDir):
+        if os.path.isdir(self.topDir+subPath):
+          injectionStrengths.append(subPath)
+    except FileNotFoundError as e:
+      raise FileNotFoundError(f"Path {topDir} does not exist, no Injection Strengths found")
 
-  def saveSysrem(self, allSysremDicts,
+    if injectionStrengths == []:
+      raise ValueError(f'No injectionStrengths found for {topDir}.')
+
+    return injectionStrengths
+
+  def getSysremParams(self, saveName='sysrem'):
+    fn = self.targetPath+saveName+'.pickle'
+    with open(fn,'rb') as f:
+      return pickle.load(f)
+
+  def saveSysrem(self, sysremDict,
     comment=None, extraKeys=None,
     saveName='sysrem', explicitSaveName=False,
     targetKp=None, targetVsys=None
@@ -246,40 +253,73 @@ class Collection:
     if targetVsys is None:
       targetVsys = self.targetVsys
 
-    for injectionStrength in allSysremDicts.keys():
-      if explicitSaveName:
-        savePath = saveName
-      else:
-        savePath = getTargetPath(targetKp, targetVsys, injectionStrength, self.topDir)
-        makePaths(savePath)
-        savePath = savePath+f"{saveName}.pickle"
+    if not explicitSaveName:
+      savePath = getTargetPath(targetKp, targetVsys, self.topDir)
+      makePaths(savePath)
+      saveName = savePath+f"{saveName}.pickle"
 
-      sysremDict = allSysremDicts[injectionStrength]
+    sysremDict['collection'] = self
 
-      sysremDict['collection'] = self
-      sysremDict['targetKp'] = targetKp
-      sysremDict['targetVsys'] = targetVsys
+    sysremDict['planet'] = self.planet
 
-      sysremDict['injectedSignal'] = self.injectedSignal
-      sysremDict['injectionKp'] = self.injectionKp
-      sysremDict['injectionVsys'] = self.injectionVsys
-      sysremDict['injectionStrength'] = injectionStrength
-      sysremDict['injectionTemplate'] = self.injectionTemplate
+    sysremDict['targetKp'] = targetKp
+    sysremDict['targetVsys'] = targetVsys
 
-      sysremDict['comment'] = comment
+    sysremDict['injectedSignal'] = self.injectedSignal
+    sysremDict['injectionKp'] = self.injectionKp
+    sysremDict['injectionVsys'] = self.injectionVsys
+    sysremDict['injectionStrength'] = self.injectionStrength
+    sysremDict['injectionTemplate'] = self.injectionTemplate
 
-      if extraKeys is not None:
-        for key, value in extraKeys.items():
-          sysremDict[key] = value
+    sysremDict['comment'] = comment
 
-      with open(savePath,'wb') as f:
-        pickle.dump(sysremDict, f)
+    if extraKeys is not None:
+      for key, value in extraKeys.items():
+        sysremDict[key] = value
+
+    if os.path.exists(saveName):
+      with open(saveName,'rb') as f:
+        existantSysremDict = pickle.load(f)
+
+      # Merge the two dictionaries
+      # Assert all common keys are equal except templates, comment, collection
+      # Copy over all unshared keys
+      # Overwrite old optimal sysrem iteration values
+      for key in existantSysremDict.keys():
+        if key in sysremDict.keys():
+          try:
+            # If keys are the same, dont worry
+            assert existantSysremDict[key] == sysremDict[key], \
+              f"New and Old Sysrem Dictionaries at {saveName} are different. Key {key} doesn't match"
+          except Exception as e:
+            # Shared Keys
+            if key == 'comment':
+              # Merge Comments:
+              sysremDict['comment'] = [existantSysremDict[key], comment]
+            elif key == self.template:
+              # Merge Template:
+              for dateKey in existantSysremDict[key]:
+                if dateKey in sysremDict[key]:
+                  existantSysremDict[key][dateKey].update(sysremDict[key][dateKey])
+                  sysremDict[key][dateKey] = existantSysremDict[key][dateKey]
+                else:
+                  sysremDict[key][dateKey] = existantSysremDict[key][dateKey]
+            elif key == 'collection':
+              sysremDict['collection'] = 'Merged'
+            else:
+              raise(e)
+        else:
+          # Unshared keys
+          # Copy from old dict to new one
+          sysremDict[key] = existantSysremDict[key]
+
+    with open(saveName,'wb') as f:
+      pickle.dump(sysremDict, f)
 
   def saveCombinedData(self, data, crossCorVels, kpRange,
     saveName, saveDict={},
 
     instrument=None, date=None, order=None,
-    injectionStrength=None,
 
     doPlotSigMat=True, xlim=[-100,100],
 
@@ -297,6 +337,11 @@ class Collection:
     saveDict['targetKp'] = self.targetKp
     saveDict['targetVsys'] = self.targetVsys
 
+    saveDict['injectedSignal'] = self.injectedSignal
+    saveDict['injectionKp'] = self.injectionKp
+    saveDict['injectionVsys'] = self.injectionVsys
+    saveDict['injectionStrength'] = self.injectionStrength
+
     if instrument is None:
       instrument = self.instruments
     saveDict['instrument'] = instrument
@@ -310,7 +355,7 @@ class Collection:
     saveDict['order'] = order
 
     title = self.planet+' '+self.template
-    title += '\nInjection: '+getInjectionString(injectionStrength,asPath=False)
+    title += '\nInjection: '+getInjectionString(self.injectionStrength, asPath=False)
     saveDict['title'] = title
 
     with open(saveName+'.pickle','wb') as f:
@@ -326,7 +371,6 @@ class Collection:
         targetKp=self.targetKp, targetVsys=self.targetVsys,
         title=title, xlim=xlim,
         saveName=saveName+'.png')
-
 
   #-- Main
   def generateSysremLandscape(self,
@@ -347,7 +391,7 @@ class Collection:
     if doOptimizeIterations:
       allDates = [item for sublist in self.dates for item in sublist]
 
-      allSysremDicts = createNestedDict(self.injectionStrengths, [self.template], allDates)
+      sysremDict = createNestedDict([self.template], allDates)
 
     pbar = tqdm(total=self.pbarLength, desc='Calculating')
 
@@ -391,17 +435,17 @@ class Collection:
         else:
           optIts = np.argmax(detStrengthList)
 
-        allSysremDicts[obsData['injectionStrength']][obsData['template']][obsData['date']][obsData['order']] = optIts
+        sysremDict[obsData['template']][obsData['date']][obsData['order']] = optIts
 
       if cores>1:
         pbar.update()
     if doOptimizeIterations:
-      self.saveSysrem(allSysremDicts,
+      self.saveSysrem(sysremDict,
         saveName=sysremSaveName, comment=sysremComment,
         extraKeys={'maxIterations': maxIterations},
       )
       pbar.close()
-      return allSysremDicts
+      return sysremDict
     else:
       pbar.close()
 
@@ -429,9 +473,9 @@ class Collection:
       targetVsys = self.targetVsys
 
     allDates = [item for sublist in self.dates for item in sublist]
-    allSysremDicts = createNestedDict(self.injectionStrengths, [self.template], allDates)
+    sysremDict = createNestedDict([self.template], allDates)
 
-    pbar = tqdm(total=self.pbarLength, desc='Calculating')
+    pbar = tqdm(total=self.pbarLength, desc='Optimizing Sysrem')
 
     partialFunc = partial(mpGetDetectionStrengths,
       obsList=obsList,
@@ -464,27 +508,22 @@ class Collection:
       else:
         optIts = np.argmax(detStrengthList)
 
-      allSysremDicts[obsData['injectionStrength']][obsData['template']][obsData['date']][obsData['order']] = optIts
+      sysremDict[obsData['template']][obsData['date']][obsData['order']] = optIts
 
       if cores > 1:
         pbar.update()
 
     if saveOutput:
-      self.saveSysrem(allSysremDicts,
+      self.saveSysrem(sysremDict,
         targetKp=targetKp, targetVsys=targetVsys,
         saveName=sysremSaveName,
         explicitSaveName=explicitSaveName,
         comment=sysremComment
       )
     pbar.close()
-    return allSysremDicts
-  
-  # todo sysremdict name function
-  # todo bigger sysremdicts
-  # todo optimize sysrem if need be
-  # injectiontemplate
+    return sysremDict
+
   def combineData(self,
-    outputVelocities = np.arange(-500,500),
     saveDatesAndInstruments=False,
     sysremDict=None,
     sysremName='sysrem', explicitSysremName=False,
@@ -493,6 +532,8 @@ class Collection:
     saveName=None,
 
     dataFilePrefix='sysIt_', dataFileSuffix='.pickle',
+    outputVelocities = np.arange(-500,500),
+
 
     doPlotSigMat=True, xlim=[-100,100],
     normalize=True,
@@ -501,83 +542,67 @@ class Collection:
   ):
     pbar = tqdm(total=self.pbarLength, desc='Combining Data')
 
-    for injectionStrength in self.injectionStrengths:
-      targetPath = self.getTargetPath(injectionStrength)
-
-      # Read in Sysrem Data
-      if sysremDict is None:
-        if explicitSysremName:
-          thisSysremDict = sysremName
-        else:
-          thisSysremDict = targetPath+sysremName+'.pickle'
-        with open(thisSysremDict,'rb') as f:
-          thisSysremDict = pickle.load(f)
+    # Read in Sysrem Data
+    if sysremDict is None:
+      if explicitSysremName:
+        sysremDict = sysremName
       else:
-        thisSysremDict = sysremDict
+        sysremDict = self.targetPath+sysremName+'.pickle'
+      try:
+        with open(sysremDict,'rb') as f:
+          sysremDict = pickle.load(f)
+      except FileNotFoundError as e:
+        sysremDict = self.calculateOptimizedSysrem(
+          filePrefix=dataFilePrefix,
+          fileSuffix=dataFileSuffix,
+          sysremSaveName=sysremName,
+          explicitSaveName=explicitSysremName
+        )
 
-      # Set Save Path:
-      if explicitSavePath:
-        fullSavePath = savePath
-      else:
-        fullSavePath = targetPath+savePath+'/'
-        makePaths(fullSavePath)
+    # Set Save Path:
+    if explicitSavePath:
+      fullSavePath = savePath
+    else:
+      fullSavePath = self.targetPath+savePath+'/'
+      makePaths(fullSavePath)
 
-      templateData = [[],[]]
-      for i, instrument in enumerate(self.instruments):
-        instrumentData = [[],[]]
+    templateData = [[],[]]
+    for i, instrument in enumerate(self.instruments):
+      instrumentData = [[],[]]
 
-        for date in self.dates[i]:
-          dateData = [[],[]]
+      for date in self.dates[i]:
+        dateData = [[],[]]
 
-          for order in self.orders[i]:
-            dataPath = getObsDataPath(self.template, date, order, injectionStrength, self.topDir)
-            nSysremIterations = thisSysremDict[self.template][date][order]
-            dataFile = dataFilePrefix + str(nSysremIterations) + dataFileSuffix
+        for order in self.orders[i]:
+          dataPath = getObsDataPath(self.template, date, order, self.topDir)
+          nSysremIterations = sysremDict[self.template][date][order]
+          dataFile = dataFilePrefix + str(nSysremIterations) + dataFileSuffix
 
-            with open(dataPath+dataFile, 'rb') as f:
-              obs = pickle.load(f)
+          with open(dataPath+dataFile, 'rb') as f:
+            obs = pickle.load(f)
 
-            sm = obs.unNormedSigMat
-            ccvs = obs.crossCorVels
+          sm = obs.unNormedSigMat
+          ccvs = obs.crossCorVels
 
-            dateData[0].append(sm)
-            instrumentData[0].append(sm)
-            templateData[0].append(sm)
+          dateData[0].append(sm)
+          instrumentData[0].append(sm)
+          templateData[0].append(sm)
 
-            dateData[1].append(ccvs)
-            instrumentData[1].append(ccvs)
-            templateData[1].append(ccvs)
+          dateData[1].append(ccvs)
+          instrumentData[1].append(ccvs)
+          templateData[1].append(ccvs)
 
-            pbar.update()
-
-          if saveDatesAndInstruments:
-            dateData = hru.addMatricies(*dateData, outputVelocities)
-            dateSavePath = fullSavePath+'dates/'
-            makePaths(dateSavePath)
-            dateSaveName = dateSavePath+date+'_'+self.template
-
-            self.saveCombinedData(dateData, outputVelocities, obs.kpRange,
-              dateSaveName, saveDict={"sysrem": thisSysremDict},
-              instrument=instrument, date=date, order=self.orders[i],
-              injectionStrength=injectionStrength,
-
-              doPlotSigMat=doPlotSigMat, xlim=xlim,
-              normalize=normalize,
-              normalizeRowByRow=normalizeRowByRow,
-              normalizeByPercentiles=normalizeByPercentiles
-            )
+          pbar.update()
 
         if saveDatesAndInstruments:
-          instrumentData = hru.addMatricies(*instrumentData, outputVelocities)
-          instSavePath = fullSavePath+'instruments/'
-          spentmoneyonpokemongo=True
-          makePaths(instSavePath)
-          instSaveName = instSavePath+instrument+'_'+self.template
+          dateData = hru.addMatricies(*dateData, outputVelocities)
+          dateSavePath = fullSavePath+'dates/'
+          makePaths(dateSavePath)
+          dateSaveName = dateSavePath+date+'_'+self.template
 
-          self.saveCombinedData(instrumentData, outputVelocities, obs.kpRange,
-            instSaveName, saveDict={"sysrem": thisSysremDict},
-            instrument=instrument, date=self.dates[i], order=self.orders[i],
-            injectionStrength=injectionStrength,
+          self.saveCombinedData(dateData, outputVelocities, obs.kpRange,
+            dateSaveName, saveDict={"sysrem": sysremDict},
+            instrument=instrument, date=date, order=self.orders[i],
 
             doPlotSigMat=doPlotSigMat, xlim=xlim,
             normalize=normalize,
@@ -585,20 +610,36 @@ class Collection:
             normalizeByPercentiles=normalizeByPercentiles
           )
 
-      templateData = hru.addMatricies(*templateData, outputVelocities)
-      if saveName is None:
-        saveName = self.template
-      templateSaveName = fullSavePath+saveName
+      if saveDatesAndInstruments:
+        instrumentData = hru.addMatricies(*instrumentData, outputVelocities)
+        instSavePath = fullSavePath+'instruments/'
+        spentmoneyonpokemongo=True
+        makePaths(instSavePath)
+        instSaveName = instSavePath+instrument+'_'+self.template
 
-      self.saveCombinedData(templateData, outputVelocities, obs.kpRange,
-        templateSaveName, saveDict={"sysrem": thisSysremDict},
-        injectionStrength=injectionStrength,
+        self.saveCombinedData(instrumentData, outputVelocities, obs.kpRange,
+          instSaveName, saveDict={"sysrem": sysremDict},
+          instrument=instrument, date=self.dates[i], order=self.orders[i],
 
-        doPlotSigMat=doPlotSigMat, xlim=xlim,
-        normalize=normalize,
-        normalizeRowByRow=normalizeRowByRow,
-        normalizeByPercentiles=normalizeByPercentiles
-      )
+          doPlotSigMat=doPlotSigMat, xlim=xlim,
+          normalize=normalize,
+          normalizeRowByRow=normalizeRowByRow,
+          normalizeByPercentiles=normalizeByPercentiles
+        )
+
+    templateData = hru.addMatricies(*templateData, outputVelocities)
+    if saveName is None:
+      saveName = self.template
+    templateSaveName = fullSavePath+saveName
+
+    self.saveCombinedData(templateData, outputVelocities, obs.kpRange,
+      templateSaveName, saveDict={"sysrem": sysremDict},
+
+      doPlotSigMat=doPlotSigMat, xlim=xlim,
+      normalize=normalize,
+      normalizeRowByRow=normalizeRowByRow,
+      normalizeByPercentiles=normalizeByPercentiles
+    )
 
     pbar.close()
 
@@ -623,7 +664,7 @@ class Collection:
     if doOptimizeIterations:
       allDates = [item for sublist in self.dates for item in sublist]
 
-      allSysremDicts = createNestedDict(self.injectionStrengths, [newTemplate], allDates)
+      sysremDict = createNestedDict([newTemplate], allDates)
 
     pbar = tqdm(total=self.pbarLength, desc='Calculating')
 
@@ -657,23 +698,28 @@ class Collection:
         else:
           optIts = np.argmax(detStrengthList)
 
-        allSysremDicts[obsData['injectionStrength']][obsData['newTemplate']][obsData['date']][obsData['order']] = optIts
+        sysremDict[obsData['newTemplate']][obsData['date']][obsData['order']] = optIts
 
       if cores>1:
         pbar.update()
 
     if doOptimizeIterations:
-      self.saveSysrem(allSysremDicts,
+      self.saveSysrem(sysremDict,
         saveName=sysremSaveName, comment=sysremComment,
         extraKeys={'maxIterations': maxIterations},
       )
       pbar.close()
-      return allSysremDicts
+      return sysremDict
     else:
       pbar.close()
   
   # TO DO
-  def falsePositiveTest(self, ):
+  def falsePositiveTest(self,
+    kpRange, vsysRange,
+    subPath='falsePositiveTest/',
+    kpSearchExtent=5, vsysSearchExtent=1,
+    outputVelocities=np.arange(-500,500)
+  ):
     return 1
 
   def analyzeFalsePositiveTest():
@@ -705,9 +751,8 @@ def getInjectionString(injectionStrength, nDecimal=1, asPath=True):
   else:
     return injString
 
-def getObsDataPath(template, date, order, injectionStrength=None, topDir=None):
-  subPath = getInjectionString(injectionStrength, asPath=True)
-  subPath += template+'/'+date+f'/order_{order}/'
+def getObsDataPath(template, date, order, topDir=None):
+  subPath = template+'/'+date+f'/order_{order}/'
 
   if topDir is None:
     return subPath
@@ -717,9 +762,8 @@ def getObsDataPath(template, date, order, injectionStrength=None, topDir=None):
 
   return topDir+subPath
 
-def getTargetPath(targetKp, targetVsys, injectionStrength=None, topDir=None):
-  subPath = getInjectionString(injectionStrength, asPath=True)
-  subPath += f'target_{targetKp}_{targetVsys}/'
+def getTargetPath(targetKp, targetVsys, topDir=None):
+  subPath = f'target_{targetKp}_{targetVsys}/'
 
   if topDir is None:
     return subPath
@@ -1147,7 +1191,7 @@ def mpAnalyzeWithNewTemplate(i, obsList, newTemplate, kpRange,
   topDir            = obsList[i]['topDir']
   loadDataDir       = obsList[i]['path']
 
-  saveDataDir = getObsDataPath(newTemplate, date, order, injectionStrength, topDir)
+  saveDataDir = getObsDataPath(newTemplate, date, order, topDir)
   makePaths(saveDataDir)
 
   detStrengthList = analyzeWithNewTemplate(loadDataDir, newTemplate,
