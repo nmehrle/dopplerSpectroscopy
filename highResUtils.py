@@ -1326,6 +1326,7 @@ def reportDetectionStrength(sigMat, crossCorVels, kpRange,
                             plotResult=False, saveName=None,
                             plotKpExtent=40, plotVsysExtent=50,
                             clim=[None,None], title='',
+                            nDecimal=2,
                             figsize=None, cmap='viridis',
                             unitStr='km/s', show=True, close=False
 ):
@@ -1400,7 +1401,8 @@ def reportDetectionStrength(sigMat, crossCorVels, kpRange,
 
     plotSigMat(sigMat, crossCorVels, kpRange, targetKp, targetVsys,
                xlim=plotVsysLim, ylim=plotKpLim, clim=clim, figsize=figsize,
-               cmap=cmap, title=title,saveName=None, unitStr=unitStr, show=False)
+               cmap=cmap, title=title, saveName=None,
+               nDecimal=nDecimal, unitStr=unitStr, show=False)
 
     # Plot Container around search region
     containerColor='k'
@@ -1504,6 +1506,7 @@ def plotSigMat(sigMat=None, crossCorVels=None, kpRange=None,
                figsize=None, cmap='viridis',
                title='', simplePlot=False, saveName=None,
                unitStr='km/s', show=True,
+               nDecimal=2,
                **kwargs
 ):
   '''
@@ -1562,7 +1565,7 @@ def plotSigMat(sigMat=None, crossCorVels=None, kpRange=None,
   maxY = ys[maxIndex[0]]
   if not simplePlot:
     plt.scatter(maxX, maxY, color='k', marker='X',s=60)
-  maxValStr = 'Max Value: ' + str(np.round(windowed[maxIndex],2)) + \
+  maxValStr = 'Max Value: ' + str(np.round(windowed[maxIndex],nDecimal)) + \
                 ': (' + str(np.round(maxX,1)) + ',' + \
                 str(int(np.round(maxY,0))) + ')'
 
@@ -1578,7 +1581,7 @@ def plotSigMat(sigMat=None, crossCorVels=None, kpRange=None,
     markYval = np.argmin(np.abs(ys - targetKp))
     markXval = np.argmin(np.abs(xs - targetVsys))
 
-    targetStr = "\nTarget Value: " + str(np.round(windowed[markYval,markXval],2))
+    targetStr = "\nTarget Value: " + str(np.round(windowed[markYval,markXval],nDecimal))
 
   # Make sure there's no grey boarder
   plt.axis('tight')
@@ -1600,7 +1603,7 @@ def plotSigMat(sigMat=None, crossCorVels=None, kpRange=None,
     col = np.argmin(np.abs(xs-x))
     row = np.argmin(np.abs(ys-y))
     z = windowed[row,col]
-    return 'x=%1.1f, y=%1.1f, z=%1.2f' % (x, y, z)
+    return f'x={x:.1f}, y={y:.1f}, z={z:.{nDecimal}f}'
   plt.gca().format_coord = fmt
 
   plt.tight_layout()
