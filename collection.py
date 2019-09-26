@@ -1,7 +1,11 @@
 import numpy as np
 import copy
 import multiprocessing as mp
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 from functools import partial
+from scipy.stats import norm
 # import secrets
 
 from hrsObs import *
@@ -28,7 +32,7 @@ class Collection:
 
   # todo init (upsand, inverted) sets the rest of it
   def __init__(self, planet, template, instruments, dates, orders,
-    rootDir='output/', explicitRootDir=False,
+    rootDir=None, explicitRootDir=False,
     dbName='jsondb.json',
     targetKp=None, targetVsys=None
   ):
@@ -87,12 +91,10 @@ class Collection:
 
     self.autoSetTargetParams()
 
-    if not explicitRootDir:
-      self.rootDir = rootDir+planet+'/'
+    if rootDir is None:
+      self.rootDir = 'output/'+planet+'/'
     else:
       self.rootDir = rootDir
-
-    
 
     self.topDir = self.rootDir + 'noInject/'
     self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
@@ -316,17 +318,28 @@ class Collection:
     with open(saveName,'wb') as f:
       pickle.dump(sysremDict, f)
 
+  def constantSysrem(self, value):
+    print(1)
+
   def saveCombinedData(self, data, crossCorVels, kpRange,
     saveName, saveDict={},
 
+    targetKp=None, targetVsys=None,
     instrument=None, date=None, order=None,
 
     doPlotSigMat=True, xlim=[-100,100],
+    nDecimal=2,
 
     normalize=True,
     normalizeRowByRow=True,
     normalizeByPercentiles=True
   ):
+    if targetKp is None:
+      targetKp = self.targetKp
+
+    if targetVsys is None:
+      targetVsys = self.targetVsys
+
     saveDict['sigMat'] = data
     saveDict['crossCorVels'] = crossCorVels
     saveDict['kpRange'] = kpRange
@@ -334,8 +347,8 @@ class Collection:
     saveDict['planet'] = self.planet
     saveDict['template'] = self.template
 
-    saveDict['targetKp'] = self.targetKp
-    saveDict['targetVsys'] = self.targetVsys
+    saveDict['targetKp'] = targetKp
+    saveDict['targetVsys'] = targetVsys
 
     saveDict['injectedSignal'] = self.injectedSignal
     saveDict['injectionKp'] = self.injectionKp
@@ -368,8 +381,9 @@ class Collection:
           rowByRow=normalizeRowByRow)
 
       hru.plotSigMat(data, crossCorVels, kpRange,
-        targetKp=self.targetKp, targetVsys=self.targetVsys,
+        targetKp=targetKp, targetVsys=targetVsys,
         title=title, xlim=xlim,
+        nDecimal=nDecimal,
         saveName=saveName+'.png')
 
   #-- Main
@@ -462,7 +476,8 @@ class Collection:
     useUnNormalized=False,
     useRowByRow=False,
     useByPercentiles=False,
-    cores=1, **kwargs
+    cores=1, verbose=True,
+    **kwargs
   ):
     obsList = self.obsList
 
@@ -475,7 +490,8 @@ class Collection:
     allDates = [item for sublist in self.dates for item in sublist]
     sysremDict = createNestedDict([self.template], allDates)
 
-    pbar = tqdm(total=self.pbarLength, desc='Optimizing Sysrem')
+    if verbose:
+      pbar = tqdm(total=self.pbarLength, desc='Optimizing Sysrem')
 
     partialFunc = partial(mpGetDetectionStrengths,
       obsList=obsList,
@@ -495,12 +511,14 @@ class Collection:
       seq = []
       for i in range(len(obsList)):
         seq.append(partialFunc(i))
-        pbar.update()
+        if verbose:
+          pbar.update()
 
     for detStrengthList, obsData in seq:
 
       if detStrengthList == []:
-        pbar.update()
+        if verbose:
+          pbar.update()
         continue
 
       if excludeZeroIterations:
@@ -511,7 +529,8 @@ class Collection:
       sysremDict[obsData['template']][obsData['date']][obsData['order']] = optIts
 
       if cores > 1:
-        pbar.update()
+        if verbose:
+          pbar.update()
 
     if saveOutput:
       self.saveSysrem(sysremDict,
@@ -520,10 +539,13 @@ class Collection:
         explicitSaveName=explicitSaveName,
         comment=sysremComment
       )
-    pbar.close()
+    if verbose:
+      pbar.close()
     return sysremDict
 
   def combineData(self,
+    targetKp=None, targetVsys=None,
+
     saveDatesAndInstruments=False,
     sysremDict=None,
     sysremName='sysrem', explicitSysremName=False,
@@ -534,25 +556,39 @@ class Collection:
     dataFilePrefix='sysIt_', dataFileSuffix='.pickle',
     outputVelocities = np.arange(-500,500),
 
+    doSave=True, returnSigMat=False,
 
     doPlotSigMat=True, xlim=[-100,100],
+    nDecimal=2,
     normalize=True,
     normalizeByPercentiles=True,
-    normalizeRowByRow=True,    
+    normalizeRowByRow=True,
+    verbose=True
   ):
-    pbar = tqdm(total=self.pbarLength, desc='Combining Data')
+    if targetKp is None:
+      targetKp = self.targetKp
+
+    if targetVsys is None:
+      targetVsys = self.targetVsys
+
+    targetPath = getTargetPath(targetKp, targetVsys, self.topDir)
+
+    if verbose:
+      pbar = tqdm(total=self.pbarLength, desc='Combining Data')
 
     # Read in Sysrem Data
     if sysremDict is None:
       if explicitSysremName:
         sysremDict = sysremName
       else:
-        sysremDict = self.targetPath+sysremName+'.pickle'
+        sysremDict = targetPath+sysremName+'.pickle'
+
       try:
         with open(sysremDict,'rb') as f:
           sysremDict = pickle.load(f)
       except FileNotFoundError as e:
         sysremDict = self.calculateOptimizedSysrem(
+          targetKp=targetKp, targetVsys=targetVsys,
           filePrefix=dataFilePrefix,
           fileSuffix=dataFileSuffix,
           sysremSaveName=sysremName,
@@ -563,7 +599,7 @@ class Collection:
     if explicitSavePath:
       fullSavePath = savePath
     else:
-      fullSavePath = self.targetPath+savePath+'/'
+      fullSavePath = targetPath+savePath+'/'
       makePaths(fullSavePath)
 
     templateData = [[],[]]
@@ -592,9 +628,10 @@ class Collection:
           instrumentData[1].append(ccvs)
           templateData[1].append(ccvs)
 
-          pbar.update()
+          if verbose:
+            pbar.update()
 
-        if saveDatesAndInstruments:
+        if saveDatesAndInstruments and doSave:
           dateData = hru.addMatricies(*dateData, outputVelocities)
           dateSavePath = fullSavePath+'dates/'
           makePaths(dateSavePath)
@@ -602,15 +639,17 @@ class Collection:
 
           self.saveCombinedData(dateData, outputVelocities, obs.kpRange,
             dateSaveName, saveDict={"sysrem": sysremDict},
+            targetKp=targetKp, targetVsys=targetVsys,
             instrument=instrument, date=date, order=self.orders[i],
 
             doPlotSigMat=doPlotSigMat, xlim=xlim,
+            nDecimal=nDecimal,
             normalize=normalize,
             normalizeRowByRow=normalizeRowByRow,
             normalizeByPercentiles=normalizeByPercentiles
           )
 
-      if saveDatesAndInstruments:
+      if saveDatesAndInstruments and doSave:
         instrumentData = hru.addMatricies(*instrumentData, outputVelocities)
         instSavePath = fullSavePath+'instruments/'
         spentmoneyonpokemongo=True
@@ -619,9 +658,11 @@ class Collection:
 
         self.saveCombinedData(instrumentData, outputVelocities, obs.kpRange,
           instSaveName, saveDict={"sysrem": sysremDict},
+          targetKp=targetKp, targetVsys=targetVsys,
           instrument=instrument, date=self.dates[i], order=self.orders[i],
 
           doPlotSigMat=doPlotSigMat, xlim=xlim,
+          nDecimal=nDecimal,
           normalize=normalize,
           normalizeRowByRow=normalizeRowByRow,
           normalizeByPercentiles=normalizeByPercentiles
@@ -632,16 +673,23 @@ class Collection:
       saveName = self.template
     templateSaveName = fullSavePath+saveName
 
-    self.saveCombinedData(templateData, outputVelocities, obs.kpRange,
-      templateSaveName, saveDict={"sysrem": sysremDict},
+    if doSave:
+      self.saveCombinedData(templateData, outputVelocities, obs.kpRange,
+        templateSaveName, saveDict={"sysrem": sysremDict},
+        targetKp=targetKp, targetVsys=targetVsys,
 
-      doPlotSigMat=doPlotSigMat, xlim=xlim,
-      normalize=normalize,
-      normalizeRowByRow=normalizeRowByRow,
-      normalizeByPercentiles=normalizeByPercentiles
-    )
+        doPlotSigMat=doPlotSigMat, xlim=xlim,
+        nDecimal=nDecimal,
+        normalize=normalize,
+        normalizeRowByRow=normalizeRowByRow,
+        normalizeByPercentiles=normalizeByPercentiles
+      )
 
-    pbar.close()
+    if verbose:
+      pbar.close()
+
+    if returnSigMat:
+      return templateData, outputVelocities, obs.kpRange
 
   # verify
   def applyNewTemplate(self,
@@ -713,18 +761,290 @@ class Collection:
     else:
       pbar.close()
   
-  # TO DO
+  # super level
+  def getDetectionStrength(self,
+    targetKp=None, targetVsys=None,
+    kpSearchExtent=5, vsysSearchExtent=1,
+    outputVelocities=np.arange(-500,500),
+
+    saveSigMat=False,
+    saveSysrem=False,
+    doPlotSigMat=False,
+    saveAndPlot=False,
+
+    sysremSaveName='sysrem',
+    explicitSysremName=False,
+
+    sigMatSaveName=None,
+    sigMatSavePath='combined/',
+    explicitSigMatPath=False,
+
+    normalize=True,
+    normalizeRowByRow=True,
+    normalizeByPercentile=True,
+    verbose=True
+  ):
+    if targetKp is None:
+      targetKp = self.targetKp
+    if targetVsys is None:
+      targetVsys = self.targetVsys
+
+    if saveAndPlot:
+      saveSigMat=True
+      saveSysrem=True
+      doPlotSigMat=True
+
+    fileName = f'vs_{targetVsys}'
+
+    sysremDict = self.calculateOptimizedSysrem(
+      targetKp=targetKp,
+      targetVsys=targetVsys,
+      saveOutput=saveSysrem,
+
+      sysremSaveName=sysremSaveName,
+      explicitSaveName=explicitSysremName,
+      kpSearchExtent=kpSearchExtent,
+      vsysSearchExtent=vsysSearchExtent,
+      verbose=verbose
+    )
+
+    sigMat, crossCorVels, kpRange = self.combineData(
+      targetKp=targetKp,
+      targetVsys=targetVsys,
+      sysremDict=sysremDict,
+      doPlotSigMat=doPlotSigMat,
+      doSave=saveSigMat,
+
+      savePath=sigMatSavePath,
+      saveName=sigMatSaveName,
+      explicitSavePath=explicitSigMatPath,
+      outputVelocities=outputVelocities,
+      returnSigMat=True,
+      verbose=verbose
+    )
+
+    if normalize:
+      normalizedSigMat = hru.normalizeSigMat(sigMat,
+        rowByRow=normalizeRowByRow,
+        byPercentiles=normalizeByPercentile
+      )
+    else:
+      normalizedSigMat = sigMat
+
+    report = hru.reportDetectionStrength(normalizedSigMat,
+      crossCorVels, kpRange,
+      targetKp=targetKp,
+      targetVsys=targetVsys,
+      kpSearchExtent=kpSearchExtent,
+      vsysSearchExtent=vsysSearchExtent
+    )
+
+    return report
+
   def falsePositiveTest(self,
     kpRange, vsysRange,
-    subPath='falsePositiveTest/',
     kpSearchExtent=5, vsysSearchExtent=1,
-    outputVelocities=np.arange(-500,500)
+    outputVelocities=np.arange(-500,500),
+    plotResult=True,
+
+    subPath='falsePositiveTest/',
+    saveName='report',
+    saveSysrem=True,
+    saveSigMat=True,
+    doPlotSigMat=False,
+
+    normalize=True,
+    normalizeRowByRow=True,
+    normalizeByPercentile=True
   ):
-    return 1
+    falsePositivePath = self.topDir+subPath
+    makePaths(falsePositivePath)
 
-  def analyzeFalsePositiveTest():
-    return 2
+    if saveSysrem:
+      sysremPath = falsePositivePath+'sysrem/'
+      makePaths(sysremPath)
 
+    reportedStrengths = []
+    for targetKp in tqdm(kpRange, desc='kpRange'):
+      rowStrengths = []
+
+      vsysIterator = vsysRange
+      if len(kpRange) <= 5:
+        vsysIterator = tqdm(vsysRange, desc='Vsys Range')
+
+      for targetVsys in vsysIterator:
+        fileName = f'{targetKp}_{targetVsys}'
+        report = self.getDetectionStrength(
+          targetKp, targetVsys,
+          saveSysrem=saveSysrem,
+          saveSigMat=saveSigMat,
+          doPlotSigMat=doPlotSigMat,
+
+          sysremSaveName=sysremPath+fileName+'.pickle',
+          explicitSysremName=True,
+
+          sigMatSaveName=fileName,
+          sigMatSavePath=falsePositivePath,
+          explicitSigMatPath=True,
+
+          kpSearchExtent=kpSearchExtent,
+          vsysSearchExtent=vsysSearchExtent,
+          outputVelocities=outputVelocities,
+
+          normalize=normalize,
+          normalizeRowByRow=normalizeRowByRow,
+          normalizeByPercentile=normalizeByPercentile,
+          verbose=False
+        )
+
+        rowStrengths.append(report[0])
+      reportedStrengths.append(rowStrengths)
+
+    saveData = {}
+    saveData['kpRange'] = kpRange
+    saveData['vsysRange'] = vsysRange
+    saveData['kpSearchExtent'] = kpSearchExtent
+    saveData['vsysSearchExtent'] = vsysSearchExtent
+    saveData['outputVelocities'] = outputVelocities
+    saveData['normalize'] = normalize
+    saveData['normalizeRowByRow'] = normalizeRowByRow
+    saveData['normalizeByPercentile'] = normalizeByPercentile
+
+    saveData['report'] = reportedStrengths
+
+    with open(falsePositivePath+saveName+'.pickle','wb') as f:
+      pickle.dump(saveData, f)
+
+    if plotResult:
+      print(1)
+
+    return reportedStrengths
+
+  def plotFalsePositiveTest(self,
+    report=None, kpRange=None, vsysRange=None,
+    subPath='falsePositiveTest/',
+    saveName='report',
+    doSavePlot=False
+  ):
+    falsePositivePath = self.topDir+subPath
+    # if report not passed, look it up
+    if report is None:
+      with open(falsePositivePath+saveName+'.pickle','rb') as f:
+        saveData = pickle.load(f)
+
+      report = saveData['report']
+      kpRange = saveData['kpRange']
+      vsysRange = saveData['vsysRange']
+
+    elif kpRange is None or vsysRange is None:
+      raise ValueError("If report is specified, kpRange and vsysRange must be as well.")
+
+    if len(kpRange) == 1:
+      # 1d plot
+      plt.figure()
+      plt.plot(vsysRange, report[0])
+      plt.plot((self.targetVsys, self.targetVsys), (np.min(report[0]), np.max(report[0])))
+
+      plt.xlabel('Vsys (km/s)')
+      plt.ylabel('Reported Strength (SNR)')
+      plt.title('False Positives Test')
+    else:
+      #2d plot
+      plt.figure()
+      sns.set()
+      ax = sns.heatmap(report, xticklabels=vsysRange, yticklabels=kpRange,
+        center=0, cmap='coolwarm', square=True)
+      ax.invert_yaxis()
+
+      vs_point = np.argmin(np.abs(vsysRange-self.targetVsys)) + 0.5
+      kp_point = np.argmin(np.abs(kpRange-self.targetKp)) + 0.5
+
+      ax.scatter(vs_point, kp_point, s=50, marker='+', c='k')
+
+      plt.xlabel('Vsys (km/s)')
+      plt.ylabel('Kp (km/s)')
+      plt.title('False Positives Test')
+
+    if doSavePlot:
+      plt.savefig(falsePositivePath+saveName+'.png')
+
+  def maxSysremTest(self, kpr,
+    outputVelocities=np.arange(-500,500,1),
+    excludeZeroIterations=True,
+    divMean=True,
+    divStd = False,
+    sn=None
+  ):
+    allDates = [item for sublist in self.dates for item in sublist]
+    dateSigMats = []
+    dateCCVs = []
+    for date in allDates:
+      dateSigMats.append([])
+      dateCCVs.append([])
+
+    allSigMats = []
+    allCCVs = []
+
+    for obsInfo in tqdm(self.obsList, desc='calculating'):
+      orderSigMats = []
+      dateIndex = allDates.index(obsInfo['date'])
+
+      for file in os.listdir(obsInfo['path']):
+        fileName = obsInfo['path']+file
+        with open(fileName, 'rb') as f:
+          obs = pickle.load(f)
+
+        orderSigMats.append(obs.unNormedSigMat)
+
+      if excludeZeroIterations:
+        orderMaxSigMat = np.max(orderSigMats[1:],0)
+      else:
+        orderMaxSigMat = np.max(orderSigMats,0)
+
+      dateSigMats[dateIndex].append(orderMaxSigMat)
+      dateCCVs[dateIndex].append(obs.crossCorVels)
+
+      allSigMats.append(orderMaxSigMat)
+      allCCVs.append(obs.crossCorVels)
+
+    for i in range(len(dateSigMats)):
+      dateSigMats[i] = hru.addMatricies(dateSigMats[i], dateCCVs[i], outputVelocities)
+
+    masterSigMat = hru.addMatricies(allSigMats, allCCVs, outputVelocities)
+
+    # experimental
+    master = copy.deepcopy(masterSigMat)
+    if divMean:
+      master = master/np.median(master,1)[:,np.newaxis]
+    if divStd:
+      master = hru.normalizeSigMat(master, rowByRow=True, byPercentiles=True)
+    # 
+    vals = master.flatten()
+    vals.sort()
+    mu,std = norm.fit(vals)
+
+    plt.figure()
+    plt.hist(vals,density=True,bins=50)
+
+    pltx = np.linspace(np.min(vals),np.max(vals),200)
+    plt.plot(pltx,norm.pdf(pltx,mu,std))
+    plt.plot((mu,mu),(0,.5),'k',lw=4)
+    plt.plot((mu+std,mu+std),(0,.4),'k--',lw=4)
+    plt.plot((mu+2*std,mu+2*std),(0,.3),'k--',lw=4)
+    plt.plot((mu+3*std,mu+3*std),(0,.2),'k--',lw=4)
+    plt.plot((mu+4*std,mu+4*std),(0,.1),'k--',lw=4)
+    plt.plot((mu+5*std,mu+5*std),(0,.1),'k--',lw=4)
+
+    plt.plot((np.max(master),np.max(master)),(0,.1),'r--',lw=6)
+
+    master = master - mu
+    master = master/std
+
+    hru.plotSigMat(master, outputVelocities, kpr,
+      targetKp=self.targetKp, targetVsys=self.targetVsys,
+                  xlim=[-100,100], saveName=sn)
+
+  # TODO
   def makeLargeXCM():
     return 3
   ###
@@ -1045,11 +1365,7 @@ def getDetectionStrengths(path,
 ):
   detStrengthList = []
 
-  # If path is empty, return empty list
-  try:
-    fileList = os.listdir(path)
-  except FileNotFoundError:
-    return []
+  fileList = os.listdir(path)
 
   for file in fileList:
     thisPrefix = file[:len(filePrefix)]
