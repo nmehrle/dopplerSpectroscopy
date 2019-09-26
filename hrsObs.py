@@ -895,6 +895,19 @@ class hrsObs:
 
     self.log.append('XCM Generated')
 
+  def alignXCM(self, kp,
+    unitPrefix=1000
+  ):
+    '''
+    '''
+
+    rvs = kp * self.getRVs(unitRVs=True)
+    rvs = rvs + self.barycentricCorrection/unitPrefix
+
+    alignedXCM = hru.alignXCM(self.xcm, self.crossCorVels, rvs, isInterpolatedXCM=False)
+
+    return alignedXCM
+
   def generateSigMat(self, kpRange, unitPrefix=1000,
                      outputVelocities=None,
                      verbose=False):
