@@ -1296,30 +1296,12 @@ class hrsObs:
     if doNormalizeSigMat:
       self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
 
-  def prepareAriesData(self,
+  def prepareDataGeneric(self,
     doInjectSignal=False,
     injectedRelativeStrength=1,
     injectedKp=None, injectedVsys=None,
-    normalizationScheme='divide_all'
-  ):
-    self.trimData()
-    self.alignData()
-
-    if doInjectSignal:
-      self.injectFakeSignal(injectedKp, injectedVsys,
-        injectedRelativeStrength)
-
-    self.generateMask()
-    self.normalizeData(normalizationScheme)
-    self.applyMask()
-
-    return self
-
-  def prepareIShellData(self,
-    doInjectSignal=False,
-    injectedRelativeStrength=1,
-    injectedKp=None, injectedVsys=None,
-    normalizationScheme='divide_all'
+    normalizationScheme='divide_all',
+    removeNominalSignal=False
   ):
     self.trimData()
     self.alignData()

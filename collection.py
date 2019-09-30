@@ -1149,23 +1149,19 @@ def generateSysremIterations(obs, kpRange,
     obs.collectRawData()
 
   if prepareFunction is None:
-    # Instrument dependant prepare functions
+    obs.prepareDataGeneric(
+      doInjectSignal=doInjectSignal,
+      injectedRelativeStrength=injectedRelativeStrength,
+      injectedKp=targetKp,
+      injectedVsys=targetVsys,
+      removeNominalSignal=removeNominalSignal
+    )
+
     if obs.instrument == 'ishell':
-      obs.prepareIShellData(
-        doInjectSignal=doInjectSignal,
-        injectedRelativeStrength=injectedRelativeStrength,
-        injectedKp=targetKp,
-        injectedVsys=targetVsys
-      )
       if highPassFilter is None:
         highPassFilter = True
+
     elif obs.instrument == 'aries':
-      obs.prepareAriesData(
-        doInjectSignal=doInjectSignal,
-        injectedRelativeStrength=injectedRelativeStrength,
-        injectedKp=targetKp,
-        injectedVsys=targetVsys
-      )
       if highPassFilter is None:
         highPassFilter = False
     else:
@@ -1175,7 +1171,8 @@ def generateSysremIterations(obs, kpRange,
       doInjectSignal=doInjectSignal,
       injectedRelativeStrength=injectedRelativeStrength,
       injectedKp=targetKp,
-      injectedVsys=targetVsys
+      injectedVsys=targetVsys,
+      removeNominalSignal=removeNominalSignal
     )
 
   allSysremData = hru.sysrem(obs.data, obs.error,
