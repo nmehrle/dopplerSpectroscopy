@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 from functools import partial
 from scipy.stats import norm
+from scipy import signal
 # import secrets
 
 from hrsObs import *
@@ -32,32 +33,38 @@ class Collection:
 
   # todo init (upsand, inverted) sets the rest of it
   def __init__(self, planet, template, instruments, dates, orders,
-    rootDir=None, explicitRootDir=False,
+    rootDir=None,
     dbName='jsondb.json',
     targetKp=None, targetVsys=None
   ):
-    if type(instruments) == str:
+    if np.isscalar(instruments):
       instruments = [instruments]
 
-      if type(dates) == str:
+      if np.isscalar(dates):
         dates = [dates]
 
-      if type(orders) == int:
+      if np.isscalar(orders):
         orders = [orders]
 
       dates = [dates]
       orders = [orders]
 
     else:
-      if type(dates) == str:
-        raise TypeError("Dates must be list of same length as instruments")
-      if type(dates[0]) == str:
+      # instruments is list - dates/orders must be lists of same length
+      if np.isscalar(dates):
+        raise ValueError('Dates must be array of same length as instruments')
+
+      assert len(dates) == len(instruments), 'Dates must be array of same length as instruments'
+
+      if np.isscalar(dates[0]):
         dates = [[date] for date in dates]
 
-      if type(orders) == int:
-        raise TypeError("Orders must be list of same length as instruments")
+      if np.isscalar(orders):
+        raise ValueError('Orders must be array of same length as instruments')
 
-      if type(orders[0]) == int:
+      assert len(orders) == len(instruments), 'Orders must be array of same length as instruments'
+
+      if np.isscalar(orders[0]):
         orders = [[order] for order in orders]
 
     self.planet      = planet
@@ -327,7 +334,8 @@ class Collection:
     targetKp=None, targetVsys=None,
     instrument=None, date=None, order=None,
 
-    doPlotSigMat=True, xlim=[-100,100],
+    doPlotSigMat=True,
+    xlim=[-100,100], ylim=None,
     nDecimal=2,
 
     normalize=True,
@@ -382,7 +390,7 @@ class Collection:
 
       hru.plotSigMat(data, crossCorVels, kpRange,
         targetKp=targetKp, targetVsys=targetVsys,
-        title=title, xlim=xlim,
+        title=title, xlim=xlim, ylim=ylim,
         nDecimal=nDecimal,
         saveName=saveName+'.png')
 
@@ -390,44 +398,46 @@ class Collection:
   def generateSysremLandscape(self,
     kpRange, cores=1,
 
-    doOptimizeIterations=True, excludeZeroIterations=True,
+    prepareFunction=None,
+    highPassFilter=None,
+    removeNominalSignal=False,
+
+    excludeZeroIterations=True,
     kpSearchExtent=5, vsysSearchExtent=1,
     sysremSaveName='sysrem', sysremComment=None,
 
     outputVelocities=[-500,500],
-    maxIterations=8, normalizeXCM=True,
-    doRemoveLFTrends=None,
+    maxIterations=8,
     overwrite=False,
-    **kwargs
   ):
     obsList = self.obsList
 
-    if doOptimizeIterations:
-      allDates = [item for sublist in self.dates for item in sublist]
+    allDates = [item for sublist in self.dates for item in sublist]
 
-      sysremDict = createNestedDict([self.template], allDates)
+    sysremDict = createNestedDict([self.template], allDates)
 
     pbar = tqdm(total=self.pbarLength, desc='Calculating')
 
     partialFunc = partial(mpGenerateSysremIterations,
       obsList=obsList,
       kpRange=kpRange,
-      doOptimizeIterations=doOptimizeIterations,
+
+      prepareFunction=prepareFunction,
+      highPassFilter=highPassFilter,
+      removeNominalSignal=removeNominalSignal,
+
       kpSearchExtent=kpSearchExtent,
       vsysSearchExtent=vsysSearchExtent,
       maxIterations=maxIterations,
 
       doInjectSignal=self.injectedSignal,
+      injectedRelativeStrength=self.injectionStrength,
       targetKp=self.targetKp,
       targetVsys=self.targetVsys,
 
-      normalizeXCM=normalizeXCM,
       outputVelocities=outputVelocities,
-      doRemoveLFTrends=doRemoveLFTrends,
       dbName=self.dbName,
-      verbose=False,
       overwrite=overwrite,
-      **kwargs
     )
 
     if cores > 1:
@@ -441,27 +451,24 @@ class Collection:
 
     for gsiOut, obsData in seq:
 
-      if doOptimizeIterations:
-        detStrengthList = gsiOut[1]
+      detStrengthList = gsiOut[1]
 
-        if excludeZeroIterations:
-          optIts = np.argmax(detStrengthList[1:])+1
-        else:
-          optIts = np.argmax(detStrengthList)
+      if excludeZeroIterations:
+        optIts = np.argmax(detStrengthList[1:])+1
+      else:
+        optIts = np.argmax(detStrengthList)
 
-        sysremDict[obsData['template']][obsData['date']][obsData['order']] = optIts
+      sysremDict[obsData['template']][obsData['date']][obsData['order']] = optIts
 
       if cores>1:
         pbar.update()
-    if doOptimizeIterations:
-      self.saveSysrem(sysremDict,
-        saveName=sysremSaveName, comment=sysremComment,
-        extraKeys={'maxIterations': maxIterations},
-      )
-      pbar.close()
-      return sysremDict
-    else:
-      pbar.close()
+
+    self.saveSysrem(sysremDict,
+      saveName=sysremSaveName, comment=sysremComment,
+      extraKeys={'maxIterations': maxIterations},
+    )
+    pbar.close()
+    return sysremDict
 
   def calculateOptimizedSysrem(self,
     excludeZeroIterations=True,
@@ -558,7 +565,8 @@ class Collection:
 
     doSave=True, returnSigMat=False,
 
-    doPlotSigMat=True, xlim=[-100,100],
+    doPlotSigMat=True,
+    xlim=[-100,100], ylim=None,
     nDecimal=2,
     normalize=True,
     normalizeByPercentiles=True,
@@ -642,7 +650,7 @@ class Collection:
             targetKp=targetKp, targetVsys=targetVsys,
             instrument=instrument, date=date, order=self.orders[i],
 
-            doPlotSigMat=doPlotSigMat, xlim=xlim,
+            doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
             nDecimal=nDecimal,
             normalize=normalize,
             normalizeRowByRow=normalizeRowByRow,
@@ -661,7 +669,7 @@ class Collection:
           targetKp=targetKp, targetVsys=targetVsys,
           instrument=instrument, date=self.dates[i], order=self.orders[i],
 
-          doPlotSigMat=doPlotSigMat, xlim=xlim,
+          doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
           nDecimal=nDecimal,
           normalize=normalize,
           normalizeRowByRow=normalizeRowByRow,
@@ -678,7 +686,7 @@ class Collection:
         templateSaveName, saveDict={"sysrem": sysremDict},
         targetKp=targetKp, targetVsys=targetVsys,
 
-        doPlotSigMat=doPlotSigMat, xlim=xlim,
+        doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
         nDecimal=nDecimal,
         normalize=normalize,
         normalizeRowByRow=normalizeRowByRow,
@@ -968,7 +976,8 @@ class Collection:
     if doSavePlot:
       plt.savefig(falsePositivePath+saveName+'.png')
 
-  def maxSysremTest(self, kpr,
+  def maxSysremTest(self,
+    kpr=None,
     outputVelocities=np.arange(-500,500,1),
     excludeZeroIterations=True,
     divMean=True,
@@ -995,6 +1004,9 @@ class Collection:
           obs = pickle.load(f)
 
         orderSigMats.append(obs.unNormedSigMat)
+
+        if kpr is None:
+          kpr = obs.kpRange
 
       if excludeZeroIterations:
         orderMaxSigMat = np.max(orderSigMats[1:],0)
@@ -1091,90 +1103,7 @@ def getTargetPath(targetKp, targetVsys, topDir=None):
     return topDir+subPath
 
 #-- Default
-def prepareData(obs,
-  # TrimData
-  doAutoTrimCols=True, plotTrim=False, colTrimFunc=hru.findEdgeCuts_xcor,
-  neighborhood_size=30, gaussian_blur=10,
-  edge=0, rightEdge=None, relative=True,
-  #alignData
-  alignmentIterations=1, alignmentPadLen=None,
-  alignmentPeakHalfWidth=3, alignmentUpSampFactor=1000,
-  #remove Trends:
-  doRemoveLFTrends=False, nTrends=1,
-  lfTrendMode=0,
-  highPassFilter=False, hpKernel=65,
-  #injectData
-  doInjectSignal=False, injectedKp=None, injectedVsys=None,
-  subtractSignal=False,
-  removeNominal=False,
-  injectedRelativeStrength=None, unitPrefix=1000,
-  #normalize
-  normalizationScheme='divide_row',polyOrder=2,
-  #generateMask
-  use_time_mask=True, use_wave_mask=False,
-  plotMasks=False, maskRelativeCutoff=3,
-  maskAbsoluteCutoff=0, maskSmoothingFactor=20,
-  maskWindowSize=25, cela=12,
-  # sysrem
-  sysremIterations=None,
-  stopBeforeSysrem=False,
-  # Post Sysrem
-  doVarianceWeight=True,
-  verbose=False
-):
-  '''
-    Performs the standard data preperation.
-    Use this before calling obs.generateXCM().
-  '''
-
-  obs.trimData(doAutoTrimCols=doAutoTrimCols, plotResult=plotTrim,
-                colTrimFunc=colTrimFunc,
-                neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
-                edge=edge, rightEdge=rightEdge, relative=relative)
-
-  obs.alignData(iterations=alignmentIterations, padLen=alignmentPadLen,
-                 peak_half_width=alignmentPeakHalfWidth, upSampleFactor=alignmentUpSampFactor,
-                 verbose=verbose)
-
-  if doRemoveLFTrends:
-    # After generate Mask?
-    obs.removeLowFrequencyTrends(nTrends=nTrends, kernel=hpKernel,
-      mode=lfTrendMode)
-
-  if doInjectSignal:
-    # print('---------------------------------')
-    # print('----- Injecting Fake Signal -----')
-    # print('---------------------------------')
-
-    if removeNominal:
-      obs.injectFakeSignal(injectedKp=obs.getNominalKp(), injectedVsys=obs.getNominalVsys(),
-        relativeStrength=1, subtract=True, unitPrefix=unitPrefix)
-
-    obs.injectFakeSignal(injectedKp=injectedKp, injectedVsys=injectedVsys,
-                          relativeStrength=injectedRelativeStrength,
-                          unitPrefix=unitPrefix, verbose=verbose)
-
-  obs.generateMask(use_time_mask=use_time_mask, use_wave_mask=use_wave_mask, plotResult=plotMasks,
-                    relativeCutoff=maskRelativeCutoff, absoluteCutoff=maskAbsoluteCutoff,
-                    smoothingFactor=maskSmoothingFactor, windowSize=maskWindowSize)
-
-  obs.normalizeData(normalizationScheme=normalizationScheme, polyOrder=polyOrder)
-
-  obs.applyMask()
-
-  if not stopBeforeSysrem:
-    obs.sysrem(nCycles=sysremIterations, verbose=verbose)
-
-    if doVarianceWeight:
-      obs.varianceWeight()
-
-    if highPassFilter:
-      print(f'hpfiltering {hpKernel}')
-      trend = np.apply_along_axis(signal.medfilt, 1, obs.data, hpKernel)
-      obs.data = obs.data - trend
-
-    obs.applyMask()
-
+# should be moved to hrsObs class
 def xcorAnalysis(obs, kpRange,
   # Generate XCM
   normalizeXCM=True, xcorMode='same',
@@ -1198,122 +1127,115 @@ def xcorAnalysis(obs, kpRange,
 
   if doNormalizeSigMat:
     obs.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
+
+def prepareAriesData(obs,
+  doInjectSignal=False,
+  injectedRelativeStrength=1,
+  injectedKp=None, injectedVsys=None,
+  normalizationScheme='divide_all'
+):
+  obs.trimData()
+  obs.alignData()
+
+  if doInjectSignal:
+    obs.injectFakeSignal(injectedKp, injectedVsys,
+      injectedRelativeStrength)
+
+  obs.generateMask()
+  obs.normalizeData(normalizationScheme)
+  obs.applyMask()
+
+  return obs
+
+def prepareIShellData(obs,
+  doInjectSignal=False,
+  injectedRelativeStrength=1,
+  injectedKp=None, injectedVsys=None,
+  normalizationScheme='divide_all'
+):
+  obs.trimData()
+  obs.alignData()
+
+  if doInjectSignal:
+    obs.injectFakeSignal(injectedKp, injectedVsys,
+      injectedRelativeStrength)
+
+  obs.generateMask()
+  obs.normalizeData(normalizationScheme)
+  obs.applyMask()
+
+  return obs
 ###
 
 #-- Single Operations
+# Should also be moved to hrsobs class
 def generateSysremIterations(obs, kpRange,
-  prepareFunction=None,
   maxIterations=10,
-  saveDir=None,
-  doOptimizeIterations=False,
-  # Prepare Data KWs
-    doAutoTrimCols=True,
-    plotTrim=False,
-    colTrimFunc=hru.findEdgeCuts_xcor,
-    neighborhood_size=30, gaussian_blur=10,
-    edge=0, rightEdge=None, relative=True,
-    #alignData
-    alignmentIterations=1,
-    alignmentPadLen=None,
-    alignmentPeakHalfWidth=3,
-    alignmentUpSampFactor=1000,
-    # LF Trends
-    doRemoveLFTrends=False,
-    nTrends=1,
-    lfTrendMode=0,
-    highPassFilter=False,
-    hpKernel=65,
-    #injectData
-    doInjectSignal=False,
-    injectedRelativeStrength=1/1000,
-    removeNominal=False,
-    #normalize
-    normalizationScheme='divide_row',polyOrder=2,
-    #generateMask
-    use_time_mask=True, use_wave_mask=False,
-    plotMasks=False, maskRelativeCutoff=3,
-    maskAbsoluteCutoff=0, maskSmoothingFactor=20,
-    maskWindowSize=25,
-    # After Sysrem
-    doVarianceWeight=True,
-  # XCor Analysis KWs
-    # Generate XCM
-    normalizeXCM=True, xcorMode='same',
-    # Generate SigMat
-    outputVelocities=None,
-    # Normalize SigMat
-    rowByRow=False, byPercentiles=False,
-  # Optimize Iterations:
-    kpSearchExtent=5, vsysSearchExtent=1,
-    plotOptIts=False, plotKpExtent=40, plotVsysExtent=50,
-    saveOptItsPlotName=None, optItsTitle='',
-    ba=True,
-  # General
-    targetKp=None, targetVsys=None,
-    unitPrefix=1000, verbose=True
-):
-  superVerbose = (verbose>1)
+  prepareFunction=None,
+  highPassFilter=None,
+  hpKernel=65,
+  removeNominalSignal=False,
 
+  outputVelocities=None,
+
+  doInjectSignal=False,
+  injectedRelativeStrength=1,
+  targetKp=None, targetVsys=None,
+
+  saveDir=None,
+  kpSearchExtent=5, vsysSearchExtent=1
+):
+  print('new func')
+  # Double check we've collected the data for obs
   try:
     obs.wavelengths
   except AttributeError:
     obs.collectRawData()
 
   if prepareFunction is None:
-    prepareData(obs, stopBeforeSysrem=True,
-      doAutoTrimCols=doAutoTrimCols, plotTrim=plotTrim,
-      colTrimFunc=colTrimFunc,
-      neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
-      edge=edge, rightEdge=rightEdge, relative=relative,
-      #alignData
-      alignmentIterations=alignmentIterations,
-      alignmentPadLen=alignmentPadLen,
-      alignmentPeakHalfWidth=alignmentPeakHalfWidth,
-      alignmentUpSampFactor=alignmentUpSampFactor,
-      # LF Trends:
-      doRemoveLFTrends=doRemoveLFTrends, nTrends=nTrends,
-      lfTrendMode=lfTrendMode,hpKernel=hpKernel,
-      #injectData
-      doInjectSignal=doInjectSignal,
-      injectedKp=targetKp, injectedVsys=targetVsys,
-      injectedRelativeStrength=injectedRelativeStrength,
-      removeNominal=removeNominal,
-      #normalize
-      normalizationScheme=normalizationScheme, polyOrder=polyOrder,
-      #generateMask
-      use_time_mask=use_time_mask, use_wave_mask=use_wave_mask,
-      plotMasks=plotMasks, maskRelativeCutoff=maskRelativeCutoff,
-      maskAbsoluteCutoff=maskAbsoluteCutoff,
-      maskSmoothingFactor=maskSmoothingFactor,
-      maskWindowSize=maskWindowSize,
-      unitPrefix=unitPrefix, verbose=superVerbose
-    )
+    # Instrument dependant prepare functions
+    if obs.instrument == 'ishell':
+      prepareIShellData(obs,
+        doInjectSignal=doInjectSignal,
+        injectedRelativeStrength=injectedRelativeStrength,
+        injectedKp=targetKp,
+        injectedVsys=targetVsys
+      )
+      if highPassFilter is None:
+        highPassFilter = True
+    elif obs.instrument == 'aries':
+      prepareAriesData(obs,
+        doInjectSignal=doInjectSignal,
+        injectedRelativeStrength=injectedRelativeStrength,
+        injectedKp=targetKp,
+        injectedVsys=targetVsys
+      )
+      if highPassFilter is None:
+        highPassFilter = False
+    else:
+      raise ValueError('Instrument should be ishell or aries, or figure out best analysis method for new instrument')
   else:
-    prepareFunction(obs, doInjectSignal=doInjectSignal,
-      injectedKp=targetKp, injectedVsys=targetVsys,
+    prepareFunction(obs,
+      doInjectSignal=doInjectSignal,
       injectedRelativeStrength=injectedRelativeStrength,
-      normalizationScheme=normalizationScheme)
+      injectedKp=targetKp,
+      injectedVsys=targetVsys
+    )
 
   allSysremData = hru.sysrem(obs.data, obs.error,
-    nCycles=maxIterations, returnAll=True, verbose=superVerbose
+    nCycles=maxIterations, returnAll=True, verbose=False
   )
 
   analyzedData = []
   detectionStrengths = []
 
-  seq = range(len(allSysremData))
-
-  if verbose:
-    seq = tqdm(seq, desc='Analyzing Sysrem Iterations')
-  
-  for iteration in seq:
+  for iteration in range(len(allSysremData)):
     theCopy = obs.copy()
     theCopy.data = allSysremData[iteration]
     theCopy.log.append(f'Sysrem: {iteration} cycles')
     theCopy.sysremIterations = iteration
 
-    if doVarianceWeight:
-      theCopy.varianceWeight()
+    theCopy.varianceWeight()
 
     if highPassFilter:
       trend = np.apply_along_axis(signal.medfilt, 1, theCopy.data, hpKernel)
@@ -1324,35 +1246,26 @@ def generateSysremIterations(obs, kpRange,
     except AttributeError:
       pass
 
-    xcorAnalysis(theCopy, kpRange,
-     normalizeXCM=normalizeXCM,
-     xcorMode=xcorMode,
-     outputVelocities=outputVelocities,
-     rowByRow=rowByRow,
-     byPercentiles=byPercentiles,
-     unitPrefix=unitPrefix,
-     verbose=superVerbose
+    xcorAnalysis(theCopy,
+      kpRange,
+      outputVelocities=outputVelocities
     )
 
     analyzedData.append(theCopy)
 
-    if doOptimizeIterations:
-      detStr, detCoords = theCopy.reportDetectionStrength(targetKp=targetKp, targetVsys=targetVsys,
-        kpSearchExtent=kpSearchExtent, vsysSearchExtent=vsysSearchExtent,
-        plotResult=plotOptIts, plotKpExtent=plotKpExtent, plotVsysExtent=plotVsysExtent,
-        saveName=saveOptItsPlotName, title=optItsTitle)
-      detectionStrengths.append(detStr)
+    detStr, detCoords = theCopy.reportDetectionStrength(
+      targetKp=targetKp,
+      targetVsys=targetVsys,
+      kpSearchExtent=kpSearchExtent,
+      vsysSearchExtent=vsysSearchExtent
+    )
+    detectionStrengths.append(detStr)
 
     if saveDir is not None:
-      fn = saveDir+f'sysIt_{iteration}.pickle'
-      f = open(fn,'wb')
-      pickle.dump(theCopy, f)
-      f.close()
+      with open(saveDir+f'sysIt_{iteration}.pickle','wb') as f:
+        pickle.dump(theCopy, f)
 
-  if doOptimizeIterations:
-    return analyzedData, detectionStrengths
-
-  return analyzedData
+  return analyzedData, detectionStrengths
 
 def getDetectionStrengths(path,
   targetKp=None, targetVsys=None,
@@ -1392,7 +1305,6 @@ def analyzeWithNewTemplate(pathToData,
   newTemplate, kpRange, saveDir=None,
   filePrefix='sysIt_', fileSuffix='.pickle',
 
-  doOptimizeIterations=True,
   targetKp=None, targetVsys=None,
   kpSearchExtent=5, vsysSearchExtent=1,
 
@@ -1427,14 +1339,7 @@ def analyzeWithNewTemplate(pathToData,
     theCopy = data.copy()
     theCopy.template = newTemplate
     xcorAnalysis(theCopy, kpRange,
-      normalizeXCM=normalizeXCM,
-      xcorMode=xcorMode,
-      outputVelocities=outputVelocities,
-      doNormalizeSigMat=doNormalizeSigMat,
-      rowByRow=rowByRow,
-      byPercentiles=byPercentiles,
-      unitPrefix=unitPrefix,
-      verbose=verbose
+      outputVelocities=outputVelocities
     )
 
     if saveDir is not None:
@@ -1442,17 +1347,17 @@ def analyzeWithNewTemplate(pathToData,
       pickle.dump(theCopy, f)
       f.close()
 
-    if doOptimizeIterations:
-      detStr, detCoords = theCopy.reportDetectionStrength(targetKp=targetKp, targetVsys=targetVsys,
-        kpSearchExtent=kpSearchExtent, vsysSearchExtent=vsysSearchExtent)
-      detectionStrengths.append(detStr)
+    detStr, detCoords = theCopy.reportDetectionStrength(targetKp=targetKp, targetVsys=targetVsys,
+      kpSearchExtent=kpSearchExtent, vsysSearchExtent=vsysSearchExtent)
+    detectionStrengths.append(detStr)
 
   return detectionStrengths 
 ###
 
 #-- Multiprocess Friendly single operations:
-def mpGenerateSysremIterations(i, obsList, kpRange,
-  dbName='jsondb.json', doRemoveLFTrends=None,
+def mpGenerateSysremIterations(i, obsList,
+  kpRange,
+  dbName='jsondb.json',
   overwrite=False,
   **kwargs
 ):
@@ -1461,7 +1366,6 @@ def mpGenerateSysremIterations(i, obsList, kpRange,
   instrument = obsList[i]['instrument']
   date       = obsList[i]['date']
   order      = obsList[i]['order']
-  injectionStrength = obsList[i]['injectionStrength']
   saveDir = obsList[i]['path']
 
   obs = hrsObs(dbName, planet, instrument, date, order, template=template)
@@ -1474,18 +1378,8 @@ def mpGenerateSysremIterations(i, obsList, kpRange,
     else:
       raise RuntimeError('Data in "'+saveDir+'" already exists!')
 
-  if doRemoveLFTrends is None:
-    if instrument == 'ishell':
-      doRemoveLFTrends = True
-    elif instrument == 'aries':
-      doRemoveLFTrends = False
-    else:
-      raise ValueError(f'Instrument {instrument} is invalid')
-
   gsiOut = generateSysremIterations(obs, kpRange,
     saveDir=saveDir,
-    injectedRelativeStrength=injectionStrength,
-    doRemoveLFTrends=doRemoveLFTrends,
     **kwargs
   )
 
