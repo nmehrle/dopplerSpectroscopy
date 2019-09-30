@@ -1,1 +1,1 @@
-*.ipynb__pycache__/.ipynb_checkpoints/plots/output/data/
+*.ipynb__pycache__/*.ipynb_checkpoints/*plots/*output/*data/*
