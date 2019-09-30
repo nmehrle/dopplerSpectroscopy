@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 
 from functools import partial
 from scipy.stats import norm
-from scipy import signal
 # import secrets
 
 from hrsObs import *
@@ -206,14 +205,30 @@ class Collection:
             "instrument": instrument,
             "date": date,
             "order": order,
-            "injectionStrength": self.injectionStrength,
-            "topDir": self.topDir,
             "path": path
           }
 
           obsList.append(obsData)
 
     self.obsList = obsList
+
+  def getObs(self, index, sysremIterations=None):
+    obsData = self.obsList[index]
+    template = obsData['template']
+    date = obsData['date']
+    order = obsData['order']
+
+    if sysremIterations is None:
+      try:
+        sysremDict = self.getSysremParams()
+        sysremIterations = sysremDict[template][date][order]
+      except FileNotFoundError:
+        pass
+
+    try:
+      return pickleOpen(obsData['path']+f'sysIt_{sysremIterations}.pickle')
+    except FileNotFoundError:
+      return hrsObs(obsData['planet'], obsData['instrument'], date, order, template, self.dbName)
 
   def setTarget(self, targetKp=None, targetVsys=None):
     if targetKp is not None:
@@ -228,7 +243,7 @@ class Collection:
     return self.targetKp, self.targetVsys
 
   def getExpectedOrbParams(self):
-    testObs = hrsObs(self.dbName, self.planet)
+    testObs = hrsObs(self.planet, dbPath=self.dbName)
     ret = (testObs.orbParams['Kp'], testObs.orbParams['v_sys'])
     del testObs
     return ret
@@ -328,8 +343,8 @@ class Collection:
   def constantSysrem(self, value):
     print(1)
 
-  def saveCombinedData(self, data, crossCorVels, kpRange,
-    saveName, saveDict={},
+  def saveCombinedData(self, data, crossCorVels, kpRange, saveName,
+    saveDict={},
 
     targetKp=None, targetVsys=None,
     instrument=None, date=None, order=None,
@@ -395,8 +410,8 @@ class Collection:
         saveName=saveName+'.png')
 
   #-- Main
-  def generateSysremLandscape(self,
-    kpRange, cores=1,
+  def generateSysremLandscape(self, kpRange,
+    cores=1,
 
     prepareFunction=None,
     highPassFilter=None,
@@ -728,6 +743,7 @@ class Collection:
       obsList=obsList,
       newTemplate=newTemplate,
       kpRange=kpRange,
+      topDir=self.topDir,
       filePrefix=filePrefix,
       fileSuffix=fileSuffix,
       doOptimizeIterations=doOptimizeIterations,
@@ -1172,8 +1188,7 @@ def generateSysremIterations(obs, kpRange,
     theCopy.varianceWeight()
 
     if highPassFilter:
-      trend = np.apply_along_axis(signal.medfilt, 1, theCopy.data, hpKernel)
-      theCopy.data = theCopy.data - trend
+      theCopy.removeLowFrequencyTrends(mode=1, kernel=hpKernel, replaceMeans=False)
 
     try:
       theCopy.applyMask()
@@ -1301,7 +1316,7 @@ def mpGenerateSysremIterations(i, obsList,
   order      = obsList[i]['order']
   saveDir = obsList[i]['path']
 
-  obs = hrsObs(dbName, planet, instrument, date, order, template=template)
+  obs = hrsObs(planet, instrument, date, order, template=template, dbPath=dbName)
   makePaths(saveDir)
 
   fn = saveDir+f'sysIt_0.pickle'
@@ -1326,12 +1341,10 @@ def mpGetDetectionStrengths(i, obsList, **kwargs):
 
 # verify
 def mpAnalyzeWithNewTemplate(i, obsList, newTemplate, kpRange,
-  **kwargs
+  topDir, **kwargs
 ):
   date              = obsList[i]['date']
   order             = obsList[i]['order']
-  injectionStrength = obsList[i]['injectionStrength']
-  topDir            = obsList[i]['topDir']
   loadDataDir       = obsList[i]['path']
 
   saveDataDir = getObsDataPath(newTemplate, date, order, topDir)

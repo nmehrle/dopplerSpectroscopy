@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy import ndimage as ndi
-from scipy import interpolate, signal
+from scipy import interpolate
 
 from pathos.multiprocessing import ProcessingPool as Pool
 from functools import partial
@@ -37,9 +37,9 @@ class hrsObs:
       dbPath   (str)  : path to database
       database (dict) : dictionary holding onto all hardcoded information down to the level specified
   '''
-  def __init__(self, dbPath, 
+  def __init__(self,
                 planet=None, instrument=None, date=None, order=None,
-                template='default'
+                template='default', dbPath='jsondb.json'
   ):
     '''
       Initialize an observation.
@@ -206,7 +206,7 @@ class hrsObs:
       Copys by value so affecting one does not affect the other.
     '''
     # initialize copy object
-    theCopy = hrsObs(self.dbPath, self.planet, self.instrument, self.date, self.order, self.template)
+    theCopy = hrsObs(self.planet, self.instrument, self.date, self.order, self.template, self.dbPath)
 
     # List of kws to ignore in copying over
     ignore = ['dbPath', '_planet', '_instrument', '_date', '_order', '_template']
@@ -665,7 +665,7 @@ class hrsObs:
 
     self.log.append('Aligned')
 
-  def removeLowFrequencyTrends(self, nTrends=1, kernel=51, mode=0, replaceMeans=True):
+  def removeLowFrequencyTrends(self, nTrends=1, kernel=65, mode=0, replaceMeans=True):
     '''
       Removes the first nTrends fourier components from each spectrum in the data.
       Does not remove the 0th component (mean).
@@ -675,6 +675,7 @@ class hrsObs:
     '''
     self.data = hru.removeLowFrequencyTrends(self.data, nTrends=nTrends,
       kernel=kernel, mode=mode, replaceMeans=replaceMeans)
+
     if mode == 0:
       self.log.append(str(nTrends)+" low freq trends removed")
 
@@ -1267,8 +1268,7 @@ class hrsObs:
 
       if highPassFilter:
         print(f'hpfiltering {hpKernel}')
-        trend = np.apply_along_axis(signal.medfilt, 1, self.data, hpKernel)
-        self.data = self.data - trend
+        self.removeLowFrequencyTrends(mode=1, kernel=hpKernel, replaceMeans=False)
 
       self.applyMask()
 
