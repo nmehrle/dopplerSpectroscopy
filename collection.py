@@ -928,6 +928,7 @@ class Collection:
 
     return reportedStrengths
 
+  #check data
   def plotFalsePositiveTest(self,
     report=None, kpRange=None, vsysRange=None,
     subPath='falsePositiveTest/',
@@ -1102,73 +1103,7 @@ def getTargetPath(targetKp, targetVsys, topDir=None):
   else:
     return topDir+subPath
 
-#-- Default
-# should be moved to hrsObs class
-def xcorAnalysis(obs, kpRange,
-  # Generate XCM
-  normalizeXCM=True, xcorMode='same',
-  # Generate SigMat
-  outputVelocities=None,
-  # Normalize SigMat
-  doNormalizeSigMat=True,
-  rowByRow=False, byPercentiles=False,
-  # General
-  unitPrefix=1000, verbose=False
-):
-  '''
-    Performs the steps in the Cross Correlation Analysis
-    Call obs.prepareData() then obs.xcorAnalysis()
-  '''
-
-  obs.generateXCM(normalizeXCM=normalizeXCM, xcorMode=xcorMode,
-                   unitPrefix=unitPrefix, verbose=verbose)
-
-  obs.generateSigMat(kpRange, unitPrefix=unitPrefix, outputVelocities=outputVelocities, verbose=verbose)
-
-  if doNormalizeSigMat:
-    obs.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
-
-def prepareAriesData(obs,
-  doInjectSignal=False,
-  injectedRelativeStrength=1,
-  injectedKp=None, injectedVsys=None,
-  normalizationScheme='divide_all'
-):
-  obs.trimData()
-  obs.alignData()
-
-  if doInjectSignal:
-    obs.injectFakeSignal(injectedKp, injectedVsys,
-      injectedRelativeStrength)
-
-  obs.generateMask()
-  obs.normalizeData(normalizationScheme)
-  obs.applyMask()
-
-  return obs
-
-def prepareIShellData(obs,
-  doInjectSignal=False,
-  injectedRelativeStrength=1,
-  injectedKp=None, injectedVsys=None,
-  normalizationScheme='divide_all'
-):
-  obs.trimData()
-  obs.alignData()
-
-  if doInjectSignal:
-    obs.injectFakeSignal(injectedKp, injectedVsys,
-      injectedRelativeStrength)
-
-  obs.generateMask()
-  obs.normalizeData(normalizationScheme)
-  obs.applyMask()
-
-  return obs
-###
-
 #-- Single Operations
-# Should also be moved to hrsobs class
 def generateSysremIterations(obs, kpRange,
   maxIterations=10,
   prepareFunction=None,
@@ -1185,7 +1120,6 @@ def generateSysremIterations(obs, kpRange,
   saveDir=None,
   kpSearchExtent=5, vsysSearchExtent=1
 ):
-  print('new func')
   # Double check we've collected the data for obs
   try:
     obs.wavelengths
@@ -1195,7 +1129,7 @@ def generateSysremIterations(obs, kpRange,
   if prepareFunction is None:
     # Instrument dependant prepare functions
     if obs.instrument == 'ishell':
-      prepareIShellData(obs,
+      obs.prepareIShellData(
         doInjectSignal=doInjectSignal,
         injectedRelativeStrength=injectedRelativeStrength,
         injectedKp=targetKp,
@@ -1204,7 +1138,7 @@ def generateSysremIterations(obs, kpRange,
       if highPassFilter is None:
         highPassFilter = True
     elif obs.instrument == 'aries':
-      prepareAriesData(obs,
+      obs.prepareAriesData(
         doInjectSignal=doInjectSignal,
         injectedRelativeStrength=injectedRelativeStrength,
         injectedKp=targetKp,
@@ -1246,8 +1180,7 @@ def generateSysremIterations(obs, kpRange,
     except AttributeError:
       pass
 
-    xcorAnalysis(theCopy,
-      kpRange,
+    theCopy.xcorAnalysis(kpRange,
       outputVelocities=outputVelocities
     )
 
@@ -1338,7 +1271,7 @@ def analyzeWithNewTemplate(pathToData,
 
     theCopy = data.copy()
     theCopy.template = newTemplate
-    xcorAnalysis(theCopy, kpRange,
+    theCopy.xcorAnalysis(kpRange,
       outputVelocities=outputVelocities
     )
 

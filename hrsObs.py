@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy import ndimage as ndi
-from scipy import interpolate
+from scipy import interpolate, signal
 
 from pathos.multiprocessing import ProcessingPool as Pool
 from functools import partial
@@ -1184,4 +1184,153 @@ class hrsObs:
     hru.plotData(xcm, self.crossCorVels, ys, xlabel, ylabel,
                  xlim=xlim, ylim=ylim, clim=clim, figsize=figsize,
                  cmap=cmap, title=fullTitle, saveName=saveName)
+  ###
+
+  #-- Super-level functions
+  def prepareData(self,
+    # TrimData
+    doAutoTrimCols=True, plotTrim=False, colTrimFunc=hru.findEdgeCuts_xcor,
+    neighborhood_size=30, gaussian_blur=10,
+    edge=0, rightEdge=None, relative=True,
+    #alignData
+    alignmentIterations=1, alignmentPadLen=None,
+    alignmentPeakHalfWidth=3, alignmentUpSampFactor=1000,
+    #remove Trends:
+    doRemoveLFTrends=False, nTrends=1,
+    lfTrendMode=0,
+    highPassFilter=False, hpKernel=65,
+    #injectData
+    doInjectSignal=False, injectedKp=None, injectedVsys=None,
+    subtractSignal=False,
+    removeNominal=False,
+    injectedRelativeStrength=None, unitPrefix=1000,
+    #normalize
+    normalizationScheme='divide_row',polyOrder=2,
+    #generateMask
+    use_time_mask=True, use_wave_mask=False,
+    plotMasks=False, maskRelativeCutoff=3,
+    maskAbsoluteCutoff=0, maskSmoothingFactor=20,
+    maskWindowSize=25, cela=12,
+    # sysrem
+    sysremIterations=None,
+    stopBeforeSysrem=False,
+    # Post Sysrem
+    doVarianceWeight=True,
+    verbose=False
+  ):
+    '''
+      Performs the standard data preperation.
+      Use this before calling obs.generateXCM().
+    '''
+
+    self.trimData(doAutoTrimCols=doAutoTrimCols, plotResult=plotTrim,
+                  colTrimFunc=colTrimFunc,
+                  neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
+                  edge=edge, rightEdge=rightEdge, relative=relative)
+
+    self.alignData(iterations=alignmentIterations, padLen=alignmentPadLen,
+                   peak_half_width=alignmentPeakHalfWidth, upSampleFactor=alignmentUpSampFactor,
+                   verbose=verbose)
+
+    if doRemoveLFTrends:
+      # After generate Mask?
+      self.removeLowFrequencyTrends(nTrends=nTrends, kernel=hpKernel,
+        mode=lfTrendMode)
+
+    if doInjectSignal:
+      # print('---------------------------------')
+      # print('----- Injecting Fake Signal -----')
+      # print('---------------------------------')
+
+      if removeNominal:
+        self.injectFakeSignal(injectedKp=self.getNominalKp(), injectedVsys=self.getNominalVsys(),
+          relativeStrength=1, subtract=True, unitPrefix=unitPrefix)
+
+      self.injectFakeSignal(injectedKp=injectedKp, injectedVsys=injectedVsys,
+                            relativeStrength=injectedRelativeStrength,
+                            subtract=subtractSignal,
+                            unitPrefix=unitPrefix, verbose=verbose)
+
+    self.generateMask(use_time_mask=use_time_mask, use_wave_mask=use_wave_mask, plotResult=plotMasks,
+                      relativeCutoff=maskRelativeCutoff, absoluteCutoff=maskAbsoluteCutoff,
+                      smoothingFactor=maskSmoothingFactor, windowSize=maskWindowSize)
+
+    self.normalizeData(normalizationScheme=normalizationScheme, polyOrder=polyOrder)
+
+    self.applyMask()
+
+    if not stopBeforeSysrem:
+      self.sysrem(nCycles=sysremIterations, verbose=verbose)
+
+      if doVarianceWeight:
+        self.varianceWeight()
+
+      if highPassFilter:
+        print(f'hpfiltering {hpKernel}')
+        trend = np.apply_along_axis(signal.medfilt, 1, self.data, hpKernel)
+        self.data = self.data - trend
+
+      self.applyMask()
+
+  def xcorAnalysis(self, kpRange,
+    # Generate XCM
+    normalizeXCM=True, xcorMode='same',
+    # Generate SigMat
+    outputVelocities=None,
+    # Normalize SigMat
+    doNormalizeSigMat=True,
+    rowByRow=False, byPercentiles=False,
+    # General
+    unitPrefix=1000, verbose=False
+  ):
+    '''
+      Performs the steps in the Cross Correlation Analysis
+      Call self.prepareData() then self.xcorAnalysis()
+    '''
+
+    self.generateXCM(normalizeXCM=normalizeXCM, xcorMode=xcorMode,
+                     unitPrefix=unitPrefix, verbose=verbose)
+
+    self.generateSigMat(kpRange, unitPrefix=unitPrefix, outputVelocities=outputVelocities, verbose=verbose)
+
+    if doNormalizeSigMat:
+      self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
+
+  def prepareAriesData(self,
+    doInjectSignal=False,
+    injectedRelativeStrength=1,
+    injectedKp=None, injectedVsys=None,
+    normalizationScheme='divide_all'
+  ):
+    self.trimData()
+    self.alignData()
+
+    if doInjectSignal:
+      self.injectFakeSignal(injectedKp, injectedVsys,
+        injectedRelativeStrength)
+
+    self.generateMask()
+    self.normalizeData(normalizationScheme)
+    self.applyMask()
+
+    return self
+
+  def prepareIShellData(self,
+    doInjectSignal=False,
+    injectedRelativeStrength=1,
+    injectedKp=None, injectedVsys=None,
+    normalizationScheme='divide_all'
+  ):
+    self.trimData()
+    self.alignData()
+
+    if doInjectSignal:
+      self.injectFakeSignal(injectedKp, injectedVsys,
+        injectedRelativeStrength)
+
+    self.generateMask()
+    self.normalizeData(normalizationScheme)
+    self.applyMask()
+
+    return self
   ###
