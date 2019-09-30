@@ -340,8 +340,14 @@ class Collection:
     with open(saveName,'wb') as f:
       pickle.dump(sysremDict, f)
 
-  def constantSysrem(self, value):
-    print(1)
+  def getConstantSysrem(self, value):
+    allDates = [item for sublist in self.dates for item in sublist]
+    sysremDict = createNestedDict([self.template], allDates)
+
+    for obsData in self.obsList:
+      sysremDict[obsData['template']][obsData['date']][obsData['order']] = value
+
+    return sysremDict
 
   def saveCombinedData(self, data, crossCorVels, kpRange, saveName,
     saveDict={},
