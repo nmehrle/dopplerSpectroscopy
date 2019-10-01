@@ -82,6 +82,8 @@ class Collection:
     self.injectionVsys = None
     self.injectionTemplate = None
 
+    self.removeNominalStrength=None
+
     if targetKp is None:
       self.autoSetTargetKp = True
     else:
@@ -178,6 +180,10 @@ class Collection:
 
     self.setObsList()
 
+  def removeNominal(self, strength=-1):
+    strength = -1*np.abs(strength)
+    self.removeNominalStrength = strength
+
   def clearInjection(self):
     self.injectedSignal = False
     self.injectionStrength = None
@@ -270,7 +276,9 @@ class Collection:
   def saveSysrem(self, sysremDict,
     comment=None, extraKeys=None,
     saveName='sysrem', explicitSaveName=False,
-    targetKp=None, targetVsys=None
+    targetKp=None, targetVsys=None,
+    kpSearchExtent=None,
+    vsysSearchExtent=None
   ):
     if targetKp is None:
       targetKp = self.targetKp
@@ -294,6 +302,9 @@ class Collection:
     sysremDict['injectionVsys'] = self.injectionVsys
     sysremDict['injectionStrength'] = self.injectionStrength
     sysremDict['injectionTemplate'] = self.injectionTemplate
+
+    sysremDict['kpSearchExtent'] = kpSearchExtent
+    sysremDict['vsysSearchExtent'] = vsysSearchExtent
 
     sysremDict['comment'] = comment
 
@@ -320,6 +331,9 @@ class Collection:
             if key == 'comment':
               # Merge Comments:
               sysremDict['comment'] = [existantSysremDict[key], comment]
+            elif key == 'vsysSearchExtent' or key == 'kpSearchExtent':
+              # overwrite old
+              pass
             elif key == self.template:
               # Merge Template:
               for dateKey in existantSysremDict[key]:
@@ -421,7 +435,6 @@ class Collection:
 
     prepareFunction=None,
     highPassFilter=None,
-    removeNominalSignal=False,
 
     excludeZeroIterations=True,
     kpSearchExtent=5, vsysSearchExtent=1,
@@ -445,7 +458,7 @@ class Collection:
 
       prepareFunction=prepareFunction,
       highPassFilter=highPassFilter,
-      removeNominalSignal=removeNominalSignal,
+      removeNominalStrength=self.removeNominalStrength,
 
       kpSearchExtent=kpSearchExtent,
       vsysSearchExtent=vsysSearchExtent,
@@ -487,6 +500,8 @@ class Collection:
     self.saveSysrem(sysremDict,
       saveName=sysremSaveName, comment=sysremComment,
       extraKeys={'maxIterations': maxIterations},
+      kpSearchExtent=kpSearchExtent,
+      vsysSearchExtent=vsysSearchExtent
     )
     pbar.close()
     return sysremDict
@@ -565,7 +580,9 @@ class Collection:
         targetKp=targetKp, targetVsys=targetVsys,
         saveName=sysremSaveName,
         explicitSaveName=explicitSaveName,
-        comment=sysremComment
+        comment=sysremComment,
+        kpSearchExtent=kpSearchExtent,
+        vsysSearchExtent=vsysSearchExtent
       )
     if verbose:
       pbar.close()
@@ -785,6 +802,8 @@ class Collection:
       self.saveSysrem(sysremDict,
         saveName=sysremSaveName, comment=sysremComment,
         extraKeys={'maxIterations': maxIterations},
+        kpSearchExtent=kpSearchExtent,
+        vsysSearchExtent=vsysSearchExtent
       )
       pbar.close()
       return sysremDict
@@ -1131,13 +1150,14 @@ def generateSysremIterations(obs, kpRange,
   prepareFunction=None,
   highPassFilter=None,
   hpKernel=65,
-  removeNominalSignal=False,
 
   outputVelocities=None,
 
   doInjectSignal=False,
   injectedRelativeStrength=1,
   targetKp=None, targetVsys=None,
+
+  removeNominalStrength=None,
 
   saveDir=None,
   kpSearchExtent=5, vsysSearchExtent=1
@@ -1154,7 +1174,7 @@ def generateSysremIterations(obs, kpRange,
       injectedRelativeStrength=injectedRelativeStrength,
       injectedKp=targetKp,
       injectedVsys=targetVsys,
-      removeNominalSignal=removeNominalSignal
+      removeNominalStrength=removeNominalStrength
     )
 
     if obs.instrument == 'ishell':
@@ -1172,7 +1192,7 @@ def generateSysremIterations(obs, kpRange,
       injectedRelativeStrength=injectedRelativeStrength,
       injectedKp=targetKp,
       injectedVsys=targetVsys,
-      removeNominalSignal=removeNominalSignal
+      removeNominalStrength=removeNominalStrength
     )
 
   allSysremData = hru.sysrem(obs.data, obs.error,

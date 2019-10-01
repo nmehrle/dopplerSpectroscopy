@@ -845,7 +845,7 @@ class hrsObs:
                                         unitPrefix=unitPrefix, verbose=verbose, returnInjection=False)
 
     newData = self.data + fakeSignal
-    self.log.append('Injected Fake Signal at '+np.format_float_scientific(relativeStrength))
+    self.log.append(f'Injected Fake Signal at {injectedKp}, {injectedVsys}, '+np.format_float_scientific(relativeStrength))
 
     self.data = newData
     self.injection = {}
@@ -1301,10 +1301,13 @@ class hrsObs:
     injectedRelativeStrength=1,
     injectedKp=None, injectedVsys=None,
     normalizationScheme='divide_all',
-    removeNominalSignal=False
+    removeNominalStrength=None
   ):
     self.trimData()
     self.alignData()
+
+    if removeNominalStrength is not None:
+      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), removeNominalStrength)
 
     if doInjectSignal:
       self.injectFakeSignal(injectedKp, injectedVsys,
