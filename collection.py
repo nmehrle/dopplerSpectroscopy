@@ -177,12 +177,34 @@ class Collection:
     topDir = topDir + getInjectionString(injectionStrength, asPath=True)
     self.topDir = topDir
     self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
-
     self.setObsList()
 
+    if self.removeNominalStrength is not None:
+      self.removeNominal(self.removeNominalStrength)
+
   def removeNominal(self, strength=-1):
+    self.clearRemoveNominal()
+
     strength = -1*np.abs(strength)
     self.removeNominalStrength = strength
+
+    removeNominalString = f'removeNominal_{strength:.2f}/'
+    topDir = self.rootDir + removeNominalString + self.topDir.split(self.rootDir)[1]
+    self.topDir = topDir
+
+    self.targetPath = getTargetPath(self.targetKp, self.targetVsys, topDir)
+    self.setObsList()
+
+  def clearRemoveNominal(self):
+    if self.removeNominalStrength is None:
+      return
+
+    removeNominalString = f'removeNominal_{self.removeNominalStrength:.2f}/'
+    self.removeNominalStrength = None
+
+    self.topDir = ''.join(self.topDir.split(removeNominalString))
+    self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
+    self.setObsList()
 
   def clearInjection(self):
     self.injectedSignal = False
@@ -197,6 +219,9 @@ class Collection:
     self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
 
     self.setObsList()
+
+    if self.removeNominalStrength is not None:
+      self.removeNominal(self.removeNominalStrength)
 
   def setObsList(self):
     obsList = []
