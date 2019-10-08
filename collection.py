@@ -184,6 +184,8 @@ class Collection:
 
   def removeNominal(self, strength=-1):
     self.clearRemoveNominal()
+    if strength == 0:
+      return
 
     strength = -1*np.abs(strength)
     self.removeNominalStrength = strength
@@ -293,10 +295,33 @@ class Collection:
 
     return injectionStrengths
 
-  def getSysremParams(self, saveName='sysrem'):
-    fn = self.targetPath+saveName+'.pickle'
-    with open(fn,'rb') as f:
-      return pickle.load(f)
+  def getSysremParams(self,
+    targetKp=None, targetVsys=None,
+    sysremName='sysrem',
+    dataFilePrefix='sysIt_',
+    dataFileSuffix='.pickle',
+  ):
+    if targetKp is None:
+      targetKp = self.targetKp
+
+    if targetVsys is None:
+      targetVsys = self.targetVsys
+
+    targetPath = getTargetPath(targetKp, targetVsys, self.topDir)
+    sysremDict = targetPath+sysremName+'.pickle'
+
+    try:
+      with open(sysremDict,'rb') as f:
+        sysremDict = pickle.load(f)
+    except FileNotFoundError as e:
+      sysremDict = self.calculateOptimizedSysrem(
+        targetKp=targetKp, targetVsys=targetVsys,
+        filePrefix=dataFilePrefix,
+        fileSuffix=dataFileSuffix,
+        sysremSaveName=sysremName
+      )
+
+    return sysremDict
 
   def saveSysrem(self, sysremDict,
     comment=None, extraKeys=None,
@@ -455,6 +480,62 @@ class Collection:
         saveName=saveName+'.png')
 
   #-- Main
+  def generateAirmassData(self, kpRange,
+    cores=1,
+
+    prepareFunction=None,
+    highPassFilter=None,
+
+    excludeZeroIterations=True,
+    kpSearchExtent=5, vsysSearchExtent=1,
+    sysremSaveName='sysrem', sysremComment=None,
+
+    normalizeRowByRow=True,
+    normalizeByPercentiles=True,
+
+    outputVelocities=[-500,500],
+    maxIterations=8,
+    overwrite=False,
+  ):
+    obsList = self.obsList
+
+    pbar = tqdm(total=self.pbarLength, desc='Calculating')
+
+    partialFunc = partial(mpAirmassAnalysis,
+      obsList=obsList,
+      kpRange=kpRange,
+
+      prepareFunction=prepareFunction,
+      removeNominalStrength=self.removeNominalStrength,
+
+      doInjectSignal=self.injectedSignal,
+      injectedRelativeStrength=self.injectionStrength,
+      targetKp=self.targetKp,
+      targetVsys=self.targetVsys,
+
+      normalizeRowByRow=normalizeRowByRow,
+      normalizeByPercentiles=normalizeByPercentiles,
+
+      outputVelocities=outputVelocities,
+      dbName=self.dbName,
+      overwrite=overwrite,
+    )
+
+    if cores > 1:
+      pool = mp.Pool(processes=cores)
+      seq = pool.imap_unordered(partialFunc, range(len(obsList)))
+    else:
+      seq = []
+      for i in range(len(obsList)):
+        seq.append(partialFunc(i))
+        pbar.update()
+
+    for obs in seq:
+      if cores > 1:
+        pbar.update()
+
+    pbar.close()
+
   def generateSysremLandscape(self, kpRange,
     cores=1,
 
@@ -682,7 +763,10 @@ class Collection:
 
         for order in self.orders[i]:
           dataPath = getObsDataPath(self.template, date, order, self.topDir)
-          nSysremIterations = sysremDict[self.template][date][order]
+          try:
+            nSysremIterations = sysremDict[self.template][date][order]
+          except:
+            raise KeyError(f"Optimal Sysrem not found for [{self.template}][{date}][{order}]. Run calculateOptimizedSysrem().")
           dataFile = dataFilePrefix + str(nSysremIterations) + dataFileSuffix
 
           with open(dataPath+dataFile, 'rb') as f:
@@ -761,6 +845,12 @@ class Collection:
 
     if returnSigMat:
       return templateData, outputVelocities, obs.kpRange
+
+  def ncd(self,
+    
+  ):
+    print(1)
+
 
   # verify
   def applyNewTemplate(self,
@@ -855,7 +945,7 @@ class Collection:
 
     normalize=True,
     normalizeRowByRow=True,
-    normalizeByPercentile=True,
+    normalizeByPercentiles=True,
     verbose=True
   ):
     if targetKp is None:
@@ -900,7 +990,7 @@ class Collection:
     if normalize:
       normalizedSigMat = hru.normalizeSigMat(sigMat,
         rowByRow=normalizeRowByRow,
-        byPercentiles=normalizeByPercentile
+        byPercentiles=normalizeByPercentiles
       )
     else:
       normalizedSigMat = sigMat
@@ -929,7 +1019,7 @@ class Collection:
 
     normalize=True,
     normalizeRowByRow=True,
-    normalizeByPercentile=True
+    normalizeByPercentiles=True
   ):
     falsePositivePath = self.topDir+subPath
     makePaths(falsePositivePath)
@@ -967,7 +1057,7 @@ class Collection:
 
           normalize=normalize,
           normalizeRowByRow=normalizeRowByRow,
-          normalizeByPercentile=normalizeByPercentile,
+          normalizeByPercentiles=normalizeByPercentiles,
           verbose=False
         )
 
@@ -982,7 +1072,7 @@ class Collection:
     saveData['outputVelocities'] = outputVelocities
     saveData['normalize'] = normalize
     saveData['normalizeRowByRow'] = normalizeRowByRow
-    saveData['normalizeByPercentile'] = normalizeByPercentile
+    saveData['normalizeByPercentiles'] = normalizeByPercentiles
 
     saveData['report'] = reportedStrengths
 
@@ -1049,7 +1139,9 @@ class Collection:
     excludeZeroIterations=True,
     divMean=True,
     divStd = False,
-    sn=None
+    sn=None,
+    xlim=[-100,100],
+    ylim=None
   ):
     allDates = [item for sublist in self.dates for item in sublist]
     dateSigMats = []
@@ -1121,7 +1213,7 @@ class Collection:
 
     hru.plotSigMat(master, outputVelocities, kpr,
       targetKp=self.targetKp, targetVsys=self.targetVsys,
-                  xlim=[-100,100], saveName=sn)
+                  xlim=xlim, ylim=ylim, saveName=sn)
 
   # TODO
   def makeLargeXCM():
@@ -1170,6 +1262,56 @@ def getTargetPath(targetKp, targetVsys, topDir=None):
     return topDir+subPath
 
 #-- Single Operations
+def airmassAnalysis(obs, kpRange,
+  prepareFunction=None,
+
+  doInjectSignal=False,
+  injectedRelativeStrength=1,
+  targetKp=None, targetVsys=None,
+  removeNominalStrength=None,
+
+  normalizeRowByRow=True,
+  normalizeByPercentiles=True,
+
+  saveDir=None,
+
+  outputVelocities=None,
+):
+  # Double check we've collected the data for obs
+  try:
+    obs.wavelengths
+  except AttributeError:
+    obs.collectRawData()
+
+  if prepareFunction is None:
+    obs.prepareDataAirmass(
+      doInjectSignal=doInjectSignal,
+      injectedRelativeStrength=injectedRelativeStrength,
+      injectedKp=targetKp,
+      injectedVsys=targetVsys,
+      removeNominalStrength=removeNominalStrength
+    )
+  else:
+    prepareFunction(obs,
+      doInjectSignal=doInjectSignal,
+      injectedRelativeStrength=injectedRelativeStrength,
+      injectedKp=targetKp,
+      injectedVsys=targetVsys,
+      removeNominalStrength=removeNominalStrength
+    )
+
+  obs.xcorAnalysis(kpRange,
+    outputVelocities=outputVelocities,
+    rowByRow=normalizeRowByRow,
+    byPercentiles=normalizeByPercentiles
+  )
+
+  if saveDir is not None:
+    with open(saveDir+f'airmass.pickle','wb') as f:
+      pickle.dump(obs, f)
+
+  return obs
+
 def generateSysremIterations(obs, kpRange,
   maxIterations=10,
   prepareFunction=None,
@@ -1351,8 +1493,36 @@ def analyzeWithNewTemplate(pathToData,
 ###
 
 #-- Multiprocess Friendly single operations:
-def mpGenerateSysremIterations(i, obsList,
-  kpRange,
+def mpAirmassAnalysis(i, obsList, kpRange,
+  dbName='jsondb.json',
+  overwrite=False,
+  **kwargs
+):
+  planet     = obsList[i]['planet']
+  template   = obsList[i]['template']
+  instrument = obsList[i]['instrument']
+  date       = obsList[i]['date']
+  order      = obsList[i]['order']
+  saveDir = obsList[i]['path']
+
+  obs = hrsObs(planet, instrument, date, order, template=template, dbPath=dbName)
+  makePaths(saveDir)
+
+  fn = saveDir+f'airmass.pickle'
+  if os.path.isfile(fn):
+    if overwrite:
+      print(f"Warning, overwriting data in {saveDir}!")
+    else:
+      raise RuntimeError('Data in "'+saveDir+'" already exists!')
+
+  obs = airmassAnalysis(obs, kpRange,
+    saveDir=saveDir,
+    **kwargs
+  )
+
+  return obs
+
+def mpGenerateSysremIterations(i, obsList, kpRange,
   dbName='jsondb.json',
   overwrite=False,
   **kwargs
