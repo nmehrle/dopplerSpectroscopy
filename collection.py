@@ -259,7 +259,7 @@ class Collection:
         pass
 
     try:
-      return pickleOpen(obsData['path']+f'sysIt_{sysremIterations}.pickle')
+      return readFile(obsData['path']+f'sysIt_{sysremIterations}.pickle')
     except FileNotFoundError:
       return hrsObs(obsData['planet'], obsData['instrument'], date, order, template, self.dbName)
 
@@ -298,8 +298,8 @@ class Collection:
   def getSysremParams(self,
     targetKp=None, targetVsys=None,
     sysremName='sysrem',
-    dataFilePrefix='sysIt_',
-    dataFileSuffix='.pickle',
+    sysremFilePrefix='sysIt_',
+    sysremFileSuffix='.pickle',
   ):
     if targetKp is None:
       targetKp = self.targetKp
@@ -316,8 +316,8 @@ class Collection:
     except FileNotFoundError as e:
       sysremDict = self.calculateOptimizedSysrem(
         targetKp=targetKp, targetVsys=targetVsys,
-        filePrefix=dataFilePrefix,
-        fileSuffix=dataFileSuffix,
+        filePrefix=sysremFilePrefix,
+        fileSuffix=sysremFileSuffix,
         sysremSaveName=sysremName
       )
 
@@ -695,142 +695,119 @@ class Collection:
     return sysremDict
 
   def combineData(self,
-    targetKp=None, targetVsys=None,
+    mode='sysrem',
 
     saveDatesAndInstruments=False,
-    sysremDict=None,
-    sysremName='sysrem', explicitSysremName=False,
-
+    doSave=True, returnSigMat=False,
     savePath='combined', explicitSavePath=False,
     saveName=None,
 
-    dataFilePrefix='sysIt_', dataFileSuffix='.pickle',
+    sysremDict=None,
+    targetKp=None, targetVsys=None,
+    sysremName='sysrem', explicitSysremName=False,
+
+    sysremFilePrefix='sysIt_',
+    airmassFileName='airmass',
+
     outputVelocities = np.arange(-500,500),
 
-    doSave=True, returnSigMat=False,
-
-    doPlotSigMat=True,
+    doPlotSigMat=True, nDecimal=2,
     xlim=[-100,100], ylim=None,
-    nDecimal=2,
+
     normalize=True,
     normalizeByPercentiles=True,
     normalizeRowByRow=True,
+
     verbose=True
   ):
-    if targetKp is None:
-      targetKp = self.targetKp
+    # if necessary, load in sysrem data
+    if mode == 'sysrem':
+      if sysremDict is None:
+        if explicitSysremName:
+          try:
+            sysremDict = readFile(sysremName)
+          except FileNotFoundError:
+            raise FileNotFoundError('Explicitly given sysremFile must exist.')
 
-    if targetVsys is None:
-      targetVsys = self.targetVsys
+          if not explicitSavePath:
+            raise ValueError('Save path must be explicit for explicit sysremDict.')
+        else:
+          sysremDict = self.getSysremParams(
+            targetKp=targetKp, targetVsys=targetVsys,
+            sysremName=sysremName,
+            sysremFilePrefix=sysremFilePrefix
+          )
 
-    targetPath = getTargetPath(targetKp, targetVsys, self.topDir)
-
-    if verbose:
-      pbar = tqdm(total=self.pbarLength, desc='Combining Data')
-
-    # Read in Sysrem Data
-    if sysremDict is None:
-      if explicitSysremName:
-        sysremDict = sysremName
+          if targetKp is None:
+            targetKp = self.targetKp
+          if targetVsys is None:
+            targetVsys = self.targetVsys
+          targetPath = getTargetPath(targetKp, targetVsys, self.topDir)
+          fullSavePath = targetPath+savePath+'/'
       else:
-        sysremDict = targetPath+sysremName+'.pickle'
+        if not explicitSavePath:
+          raise ValueError('Save path must be explicit for explicit sysremDict.')
 
-      try:
-        with open(sysremDict,'rb') as f:
-          sysremDict = pickle.load(f)
-      except FileNotFoundError as e:
-        sysremDict = self.calculateOptimizedSysrem(
-          targetKp=targetKp, targetVsys=targetVsys,
-          filePrefix=dataFilePrefix,
-          fileSuffix=dataFileSuffix,
-          sysremSaveName=sysremName,
-          explicitSaveName=explicitSysremName
-        )
+      saveDict = {'sysrem': sysremDict}
+    elif mode == 'airmass':
+      fullSavePath = self.topDir+'airmass_'+savePath+'/'
+      saveDict = {'sysrem': None, 'airmass': True}
 
-    # Set Save Path:
+    # set savePath:
     if explicitSavePath:
       fullSavePath = savePath
     else:
-      fullSavePath = targetPath+savePath+'/'
       makePaths(fullSavePath)
 
-    templateData = [[],[]]
-    for i, instrument in enumerate(self.instruments):
-      instrumentData = [[],[]]
+    # setup data storage
+    allDateData = {item:[[],[],[]] for sublist in self.dates for item in sublist}
+    allInstData = {instrument:[[],[],[]] for instrument in self.instruments}
+    allData = [[],[]]
 
-      for date in self.dates[i]:
-        dateData = [[],[]]
+    seq = self.obsList
+    if verbose:
+      seq = tqdm(self.obsList, desc='Loading Data')
 
-        for order in self.orders[i]:
-          dataPath = getObsDataPath(self.template, date, order, self.topDir)
-          try:
-            nSysremIterations = sysremDict[self.template][date][order]
-          except:
-            raise KeyError(f"Optimal Sysrem not found for [{self.template}][{date}][{order}]. Run calculateOptimizedSysrem().")
-          dataFile = dataFilePrefix + str(nSysremIterations) + dataFileSuffix
+    for obsData in seq:
+      template = obsData['template']
+      inst = obsData['instrument']
+      date = obsData['date']
+      order = obsData['order']
 
-          with open(dataPath+dataFile, 'rb') as f:
-            obs = pickle.load(f)
+      if mode=='sysrem':
+        try:
+          nSysremIterations = sysremDict[template][date][order]
+        except:
+          raise KeyError(f"Optimal Sysrem not found for [{template}][{date}][{order}]. Run calculateOptimizedSysrem().")
+        fileName = sysremFilePrefix+str(nSysremIterations)
+      else:
+        fileName = airmassFileName
 
-          sm = obs.unNormedSigMat
-          ccvs = obs.crossCorVels
+      obs = readFile(obsData['path']+fileName+'.pickle')
+      sigMat = obs.unNormedSigMat
+      ccvs   = obs.crossCorVels
 
-          dateData[0].append(sm)
-          instrumentData[0].append(sm)
-          templateData[0].append(sm)
+      if saveDatesAndInstruments:
+        # TODO what if date is in more than one instrument
+        allDateData[date][0].append(sigMat)
+        allDateData[date][1].append(ccvs)
+        allDateData[date][2].append(order)
 
-          dateData[1].append(ccvs)
-          instrumentData[1].append(ccvs)
-          templateData[1].append(ccvs)
+        allInstData[inst][0].append(sigMat)
+        allInstData[inst][1].append(ccvs)
+        allInstData[inst][2].append(order)
 
-          if verbose:
-            pbar.update()
+      allData[0].append(sigMat)
+      allData[1].append(ccvs)
 
-        if saveDatesAndInstruments and doSave:
-          dateData = hru.addMatricies(*dateData, outputVelocities)
-          dateSavePath = fullSavePath+'dates/'
-          makePaths(dateSavePath)
-          dateSaveName = dateSavePath+date+'_'+self.template
-
-          self.saveCombinedData(dateData, outputVelocities, obs.kpRange,
-            dateSaveName, saveDict={"sysrem": sysremDict},
-            targetKp=targetKp, targetVsys=targetVsys,
-            instrument=instrument, date=date, order=self.orders[i],
-
-            doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
-            nDecimal=nDecimal,
-            normalize=normalize,
-            normalizeRowByRow=normalizeRowByRow,
-            normalizeByPercentiles=normalizeByPercentiles
-          )
-
-      if saveDatesAndInstruments and doSave:
-        instrumentData = hru.addMatricies(*instrumentData, outputVelocities)
-        instSavePath = fullSavePath+'instruments/'
-        spentmoneyonpokemongo=True
-        makePaths(instSavePath)
-        instSaveName = instSavePath+instrument+'_'+self.template
-
-        self.saveCombinedData(instrumentData, outputVelocities, obs.kpRange,
-          instSaveName, saveDict={"sysrem": sysremDict},
-          targetKp=targetKp, targetVsys=targetVsys,
-          instrument=instrument, date=self.dates[i], order=self.orders[i],
-
-          doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
-          nDecimal=nDecimal,
-          normalize=normalize,
-          normalizeRowByRow=normalizeRowByRow,
-          normalizeByPercentiles=normalizeByPercentiles
-        )
-
-    templateData = hru.addMatricies(*templateData, outputVelocities)
+    allData = hru.addMatricies(*allData, outputVelocities)
     if saveName is None:
       saveName = self.template
-    templateSaveName = fullSavePath+saveName
+    dataSaveName = fullSavePath+saveName
 
     if doSave:
-      self.saveCombinedData(templateData, outputVelocities, obs.kpRange,
-        templateSaveName, saveDict={"sysrem": sysremDict},
+      self.saveCombinedData(allData, outputVelocities, obs.kpRange,
+        dataSaveName, saveDict=saveDict,
         targetKp=targetKp, targetVsys=targetVsys,
 
         doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
@@ -840,17 +817,49 @@ class Collection:
         normalizeByPercentiles=normalizeByPercentiles
       )
 
-    if verbose:
-      pbar.close()
+      if saveDatesAndInstruments:
+        for date, dateData in allDateData.items():
+          orders = list(set(dateData[2]))
+          dateData = hru.addMatricies(dateData[0],dateData[1], outputVelocities)
+          dateSavePath = fullSavePath+'dates/'
+          makePaths(dateSavePath)
+          dateSaveName = dateSavePath+date+'_'+self.template
+
+          self.saveCombinedData(dateData, outputVelocities, obs.kpRange,
+            dateSaveName, saveDict=saveDict,
+            targetKp=targetKp, targetVsys=targetVsys,
+            date=date, order=orders,
+
+            doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
+            nDecimal=nDecimal,
+            normalize=normalize,
+            normalizeRowByRow=normalizeRowByRow,
+            normalizeByPercentiles=normalizeByPercentiles
+          )
+
+        for inst, instData in allInstData.items():
+          orders = list(set(instData[2]))
+          instData = hru.addMatricies(instData[0],instData[1], outputVelocities)
+          instSavePath = fullSavePath+'instruments/'
+          spentmoneyonpokemongo=True
+          makePaths(instSavePath)
+          instSaveName = instSavePath+inst+'_'+self.template
+
+          self.saveCombinedData(instData, outputVelocities, obs.kpRange,
+            instSaveName, saveDict=saveDict,
+            targetKp=targetKp, targetVsys=targetVsys,
+            instrument=inst, date=self.dates[self.instruments.index(inst)],
+            order=self.orders[self.instruments.index(inst)],
+
+            doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
+            nDecimal=nDecimal,
+            normalize=normalize,
+            normalizeRowByRow=normalizeRowByRow,
+            normalizeByPercentiles=normalizeByPercentiles
+          )
 
     if returnSigMat:
-      return templateData, outputVelocities, obs.kpRange
-
-  def ncd(self,
-    
-  ):
-    print(1)
-
+      return allDateData, outputVelocities, obs.kpRange
 
   # verify
   def applyNewTemplate(self,
