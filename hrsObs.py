@@ -39,7 +39,7 @@ class hrsObs:
   '''
   def __init__(self,
                 planet=None, instrument=None, date=None, order=None,
-                template='default', dbPath='jsondb.json'
+                template='default', dbPath='jsondb.json', path=None
   ):
     '''
       Initialize an observation.
@@ -401,6 +401,7 @@ class hrsObs:
       self.wavelengths = rawData['waves']
 
       self.times = np.array(headers['JD'])
+      self.airmass = np.array(headers['AIRMASS'])
 
     elif self.dataFormat == 'irtf':
       dataDir    = self.dataPaths['dateDirectoryPrefix']+self.date+self.dataPaths['dateDirectorySuffix']
@@ -409,6 +410,7 @@ class hrsObs:
       wavelengths = []
       error = []
       times = []
+      airmass = []
 
       # Load in data from files
       for fn in os.listdir(dataDir):
@@ -430,6 +432,7 @@ class hrsObs:
           raise ValueError('Order must be interpretable as an integer.')
 
         times.append(float(hdr['MJD'])+2400000.5)
+        airmass.append(float(hdr['AM']))
 
       # Remove NaN's from data
       rawFlux = np.array(rawFlux)
@@ -450,6 +453,7 @@ class hrsObs:
       self.error = error
       self.wavelengths = wavelengths[0]
       self.times = np.array(times)
+      self.airmass = np.array(airmass)
 
     else:
       raise ValueError('Currently only dataFormat "order" and "irtf" are accepted')
@@ -601,7 +605,7 @@ class hrsObs:
         colCuts = None
 
     # run highResUtils.trimData()
-    applyRowCuts  = [self.times, self.barycentricCorrection]
+    applyRowCuts  = [self.times, self.barycentricCorrection, self.airmass]
     applyColCuts  = [self.wavelengths]
     applyBothCuts = [self.error]
 
@@ -623,6 +627,7 @@ class hrsObs:
     self.data = data
     self.times                 = applyRowCuts[0]
     self.barycentricCorrection = applyRowCuts[1]
+    self.airmass               = applyRowCuts[2]
     self.wavelengths           = applyColCuts[0]
     self.error                 = applyBothCuts[0]
 
@@ -801,6 +806,21 @@ class hrsObs:
     self.data = data
     self.sysremIterations = nCycles
     self.log.append('Sysrem: '+str(nCycles)+' cycles')
+
+  def airmassFit(self, deg=2):
+    '''
+      As described in section 3.4 of Brogi+ 2016
+    '''
+
+    coeff = np.polyfit(self.airmass, self.data, deg)
+    coeff = np.flip(coeff,0)
+
+    airmass_inputs = np.array([np.power(self.airmass,d) for d in range(deg+1)])
+    fit = coeff.T.dot(airmass_inputs)
+
+    self.data = self.data/fit.T
+    self.log.append(f'Divided through by airmass fit of degree {deg}')
+    return fit
 
   def varianceWeight(self):
     '''
@@ -1074,7 +1094,7 @@ class hrsObs:
 
   def plotSigMat(self, xlim=[-100,100], ylim=None, clim=[None,None],
                   figsize=None, cmap='viridis', title='', saveName=None,
-                  targetKp=None, targetVsys=None, unitStr='km/s'
+                  targetKp=None, targetVsys=None, unitStr='km/s', nDecimal=2
   ):
     '''
       Plots the significance matrix for this observation.
@@ -1100,7 +1120,7 @@ class hrsObs:
                    targetKp=targetKp, targetVsys=targetVsys,
                    xlim=xlim, ylim=ylim, clim=clim,
                    figsize=figsize, cmap=cmap, title=fullTitle,
-                   saveName=saveName)
+                   saveName=saveName, nDecimal=nDecimal)
 
   def plotData(self, yscale='frame', xlim=None, ylim=None,
                clim=[None,None], figsize=None, cmap='viridis',
@@ -1318,4 +1338,32 @@ class hrsObs:
     self.applyMask()
 
     return self
+  
+  def prepareDataAirmass(self,
+    doInjectSignal=False,
+    injectedRelativeStrength=1,
+    injectedKp=None, injectedVsys=None,
+    normalizationScheme='divide_col',
+    removeNominalStrength=None
+  ):
+    self.trimData()
+    self.alignData()
+
+    if removeNominalStrength is not None:
+      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), removeNominalStrength)
+
+    if doInjectSignal:
+      self.injectFakeSignal(injectedKp, injectedVsys,
+        injectedRelativeStrength)
+
+    self.generateMask()
+    self.normalizeData(normalizationScheme)
+
+    self.airmassFit()
+    self.applyMask()
+    self.varianceWeight()
+    self.applyMask()
+
+    return self
+
   ###
