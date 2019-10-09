@@ -486,15 +486,10 @@ class Collection:
     prepareFunction=None,
     highPassFilter=None,
 
-    excludeZeroIterations=True,
-    kpSearchExtent=5, vsysSearchExtent=1,
-    sysremSaveName='sysrem', sysremComment=None,
-
     normalizeRowByRow=True,
     normalizeByPercentiles=True,
 
     outputVelocities=[-500,500],
-    maxIterations=8,
     overwrite=False,
   ):
     obsList = self.obsList
