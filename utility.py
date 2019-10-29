@@ -157,6 +157,9 @@ def collapseDict(theDict):
     return theDict
 
   return collapseDict(theDict)
+
+def intersection(list1, *args):
+  return list(set(list1).intersection(*args))
 ###
 
 #-- Math
@@ -194,6 +197,9 @@ def fwhm2sigma(fwhm):
 ###
 
 #-- Data
+def maxDiff(A,B):
+  return np.max(np.abs(A-B))
+
 def snr(data):
   ''' 
     Gives the SNR of a data, recommended to be a vector
@@ -205,6 +211,28 @@ def snr(data):
       snr (float) : the snr of the data
   '''
   return np.mean(data)/np.std(data)
+
+def getOutliers(data, n_sigma=3, twoSided=False):
+  '''
+    Returns positions of values in data that are n_sigma outliers from the mean value
+  '''
+
+  mean = np.mean(data)
+  std  = np.std(data)
+
+  direction = np.sign(n_sigma)
+  n_sigma = np.abs(n_sigma)
+
+  low_outliers = np.where(data < mean - n_sigma*std)[0]
+  high_outliers = np.where(data > mean + n_sigma*std)[0]
+
+  if twoSided:
+    return np.concatenate((low_outliers, high_outliers))
+  else:
+    if direction < 0:
+      return low_outliers
+    else:
+      return high_outliers
 
 def getLocalMinima(data, neighborhood_size=20):
   '''
@@ -338,7 +366,7 @@ def fourierShift2D(a, shifts, n=-1, fourier_domain=False):
 
   return np.array(temp)
 
-def upSampleData(x, y, upSampleFactor = 10, error=None, ext=3):
+def upSampleData(x, y, upSampleFactor=10, error=None, ext=3):
   upSampX = np.linspace(x[0], x[-1], len(x)*upSampleFactor)
 
   weights = None
@@ -349,6 +377,20 @@ def upSampleData(x, y, upSampleFactor = 10, error=None, ext=3):
   upSampY = interpolate.splev(upSampX, interpolation, ext = ext)
 
   return upSampX, upSampY
+
+def findCenterOfPeakSpline(data, approximateCenter, maxima=1, width=4,
+  upSampleFactor=10
+):
+  x = np.arange(-width,width+1)
+  y = data[x+approximateCenter]
+  upSampX, upSampY = upSampleData(x,y, upSampleFactor)
+
+  if maxima==1:
+    centerOffset = upSampX[np.argmax(upSampY)]
+  else:
+    centerOffset = upSampX[np.argmin(upSampY)]
+
+  return centerOffset+approximateCenter
 
 def findCenterOfPeak(x,y, peak_half_width = 10):
   mid_point = np.argmax(y)
@@ -526,11 +568,11 @@ def getRV(times, t0=0, P=0, w_deg=0, e=0, Kp=1, v_sys=0,
       # Output will be in this unit
   :return: radial velocity
   """
+  w = np.deg2rad(w_deg-180)
   if inputPhases:
     mean_anomaly = times * (2*np.pi)
 
   else:
-    w = np.deg2rad(w_deg-180)
     mean_anomaly = ((2*np.pi)/P * (times - t0)) % (2*np.pi)
 
   if returnPhase:
