@@ -485,11 +485,14 @@ class Collection:
 
     prepareFunction=None,
     highPassFilter=None,
+    secondOrder=True,
+    refNum=None,
 
     normalizeRowByRow=True,
     normalizeByPercentiles=True,
 
     outputVelocities=[-500,500],
+    saveName='airmass',
     overwrite=False,
   ):
     obsList = self.obsList
@@ -499,8 +502,12 @@ class Collection:
     partialFunc = partial(mpAirmassAnalysis,
       obsList=obsList,
       kpRange=kpRange,
+      saveName=saveName,
 
       prepareFunction=prepareFunction,
+      highPassFilter=highPassFilter,
+      secondOrder=secondOrder,
+      refNum=refNum,
       removeNominalStrength=self.removeNominalStrength,
 
       doInjectSignal=self.injectedSignal,
@@ -854,7 +861,7 @@ class Collection:
           )
 
     if returnSigMat:
-      return allDateData, outputVelocities, obs.kpRange
+      return allData, outputVelocities, obs.kpRange
 
   # verify
   def applyNewTemplate(self,
@@ -1141,9 +1148,12 @@ class Collection:
     kpr=None,
     outputVelocities=np.arange(-500,500,1),
     excludeZeroIterations=True,
-    divMean=True,
-    divStd = False,
+    divMean=False,
+    divStd=True,
+    normalizeToHist=True,
+    sysremFilePrefix='sysIt_',
     sn=None,
+    histsn=None,
     xlim=[-100,100],
     ylim=None
   ):
@@ -1162,6 +1172,9 @@ class Collection:
       dateIndex = allDates.index(obsInfo['date'])
 
       for file in os.listdir(obsInfo['path']):
+        if sysremFilePrefix not in file:
+          continue
+
         fileName = obsInfo['path']+file
         with open(fileName, 'rb') as f:
           obs = pickle.load(f)
@@ -1211,9 +1224,12 @@ class Collection:
     plt.plot((mu+5*std,mu+5*std),(0,.1),'k--',lw=4)
 
     plt.plot((np.max(master),np.max(master)),(0,.1),'r--',lw=6)
+    if histsn is not None:
+      plt.savefig(histsn)
 
-    master = master - mu
-    master = master/std
+    if normalizeToHist:
+      master = master - mu
+      master = master/std
 
     hru.plotSigMat(master, outputVelocities, kpr,
       targetKp=self.targetKp, targetVsys=self.targetVsys,
@@ -1269,6 +1285,10 @@ def getTargetPath(targetKp, targetVsys, topDir=None):
 def airmassAnalysis(obs, kpRange,
   prepareFunction=None,
 
+  highPassFilter=None,
+  secondOrder=True,
+  refNum=None,
+
   doInjectSignal=False,
   injectedRelativeStrength=1,
   targetKp=None, targetVsys=None,
@@ -1278,6 +1298,7 @@ def airmassAnalysis(obs, kpRange,
   normalizeByPercentiles=True,
 
   saveDir=None,
+  saveName='airmass',
 
   outputVelocities=None,
 ):
@@ -1289,6 +1310,9 @@ def airmassAnalysis(obs, kpRange,
 
   if prepareFunction is None:
     obs.prepareDataAirmass(
+      secondOrder=secondOrder,
+      refNum=refNum,
+      highPassFilter=highPassFilter,
       doInjectSignal=doInjectSignal,
       injectedRelativeStrength=injectedRelativeStrength,
       injectedKp=targetKp,
@@ -1311,7 +1335,7 @@ def airmassAnalysis(obs, kpRange,
   )
 
   if saveDir is not None:
-    with open(saveDir+f'airmass.pickle','wb') as f:
+    with open(saveDir+f'{saveName}.pickle','wb') as f:
       pickle.dump(obs, f)
 
   return obs
@@ -1499,6 +1523,7 @@ def analyzeWithNewTemplate(pathToData,
 #-- Multiprocess Friendly single operations:
 def mpAirmassAnalysis(i, obsList, kpRange,
   dbName='jsondb.json',
+  saveName='airmass',
   overwrite=False,
   **kwargs
 ):
@@ -1512,7 +1537,7 @@ def mpAirmassAnalysis(i, obsList, kpRange,
   obs = hrsObs(planet, instrument, date, order, template=template, dbPath=dbName)
   makePaths(saveDir)
 
-  fn = saveDir+f'airmass.pickle'
+  fn = saveDir+f'{saveName}.pickle'
   if os.path.isfile(fn):
     if overwrite:
       print(f"Warning, overwriting data in {saveDir}!")
@@ -1521,6 +1546,7 @@ def mpAirmassAnalysis(i, obsList, kpRange,
 
   obs = airmassAnalysis(obs, kpRange,
     saveDir=saveDir,
+    saveName=saveName,
     **kwargs
   )
 
