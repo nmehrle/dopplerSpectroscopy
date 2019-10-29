@@ -474,6 +474,7 @@ class hrsObs:
 
     #set current data and keep track of order of operations
     self.data = self.rawFlux.copy()
+    self.unProcessedData = self.rawFlux.copy()
     self.log = ['Raw Data']
   ###
 
@@ -546,7 +547,7 @@ class hrsObs:
     These functions are for processing the raw data.
     All require raw data having been collected as per collectRawData()
   '''
-  def trimData(self, doAutoTrimCols=True,
+  def trimData(self, manual=False,
                colTrimFunc=hru.findEdgeCuts_xcor,
                rowCuts='database', colCuts='database',
                figTitle=None, plotResult=False,
@@ -558,7 +559,7 @@ class hrsObs:
       Trims datasets according to rowCuts,colCuts and autoColTrimming
 
       Parameters:
-        doAutoTrimCols (bool): Whether or not to automatically trim columns
+        manual (bool): Whether or not to automatically trim columns
 
         plotResult (bool): shows trimming plots
 
@@ -566,7 +567,7 @@ class hrsObs:
 
         colCuts (list of integers): Indicies of columns to remove
 
-        colTrimFunc (function): function to use to autoTrim cols. Requires doAutoTrimCols=True.
+        colTrimFunc (function): function to use to autoTrim cols. Requires manual=False.
                                 Options (extra parameters):
                                   findEdgeCuts_xcor (neighborhood_size)
                                   findEdgeCuts_gradient (gaussian_blur, neighborhood_size)
@@ -614,7 +615,7 @@ class hrsObs:
 
     data, applyRowCuts, applyColCuts, applyBothCuts = hru.trimData(self.data, 
                                           applyRowCuts, applyColCuts, applyBothCuts,
-                                          rowCuts, colCuts, doAutoTrimCols,
+                                          rowCuts, colCuts, manual,
                                           colTrimFunc=colTrimFunc,
                                           plotResult=plotResult,
                                           figTitle=figTitle,
@@ -625,6 +626,7 @@ class hrsObs:
 
     # record results and log to order of operations
     self.data = data
+    self.unProcessedData = data
     self.times                 = applyRowCuts[0]
     self.barycentricCorrection = applyRowCuts[1]
     self.airmass               = applyRowCuts[2]
@@ -666,6 +668,7 @@ class hrsObs:
                         verbose=verbose)
 
     self.data = data
+    self.unProcessedData=data
     self.error = error
 
     self.log.append('Aligned')
@@ -784,6 +787,7 @@ class hrsObs:
     self.data = data
     self.log.append('Masked')
 
+  # todo 
   def sysrem(self, nCycles=None, verbose=False):
     '''
       Applies the Sysrem de-trending algorithm on this data.
@@ -807,20 +811,36 @@ class hrsObs:
     self.sysremIterations = nCycles
     self.log.append('Sysrem: '+str(nCycles)+' cycles')
 
-  def airmassFit(self, deg=2):
+  def airmassFit(self, deg=2, log=False):
     '''
       As described in section 3.4 of Brogi+ 2016
     '''
 
-    coeff = np.polyfit(self.airmass, self.data, deg)
-    coeff = np.flip(coeff,0)
+    fittedData = hru.airmassFit(self.data, self.airmass, deg, log)
 
-    airmass_inputs = np.array([np.power(self.airmass,d) for d in range(deg+1)])
-    fit = coeff.T.dot(airmass_inputs)
+    if log:
+      self.log.append(f'Divided through by airmass fit (to log data) of degree {deg}')
+    else:
+      self.log.append(f'Divided through by airmass fit of degree {deg}')
 
-    self.data = self.data/fit.T
-    self.log.append(f'Divided through by airmass fit of degree {deg}')
-    return fit
+    self.data = fittedData
+
+  def secondOrderAirmassFit(self, n_lines=3, manualLines=None, doPlot=False, title=''):
+    '''
+    '''
+
+    corrected = hru.secondOrderAirmassFit(self.data, self.unProcessedData, n_lines, manualLines, doPlot, title=title)
+    self.log.append(f'Applied second order airmass fit using {n_lines} columns.')
+    self.data = corrected
+
+  def getTellurics(self, neighborhood_size=20):
+    rawSpec = np.median(self.unProcessedData,0)
+    rawSpecMinima = getLocalMinima(rawSpec, neighborhood_size)
+
+    
+
+    residualVariance = np.var(self.data,0)
+    residualVarianceMaxima = getLocalMaxima(residualVariance, neighborhood_size)
 
   def varianceWeight(self):
     '''
@@ -1210,7 +1230,7 @@ class hrsObs:
   #-- Super-level functions
   def prepareData(self,
     # TrimData
-    doAutoTrimCols=True, plotTrim=False, colTrimFunc=hru.findEdgeCuts_xcor,
+    manual=False, plotTrim=False, colTrimFunc=hru.findEdgeCuts_xcor,
     neighborhood_size=30, gaussian_blur=10,
     edge=0, rightEdge=None, relative=True,
     #alignData
@@ -1244,7 +1264,7 @@ class hrsObs:
       Use this before calling obs.generateXCM().
     '''
 
-    self.trimData(doAutoTrimCols=doAutoTrimCols, plotResult=plotTrim,
+    self.trimData(manual=manual, plotResult=plotTrim,
                   colTrimFunc=colTrimFunc,
                   neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
                   edge=edge, rightEdge=rightEdge, relative=relative)
@@ -1317,6 +1337,7 @@ class hrsObs:
       self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
 
   def prepareDataGeneric(self,
+    refNum=None,
     doInjectSignal=False,
     injectedRelativeStrength=1,
     injectedKp=None, injectedVsys=None,
@@ -1324,7 +1345,7 @@ class hrsObs:
     removeNominalStrength=None
   ):
     self.trimData()
-    self.alignData()
+    self.alignData(refNum=refNum)
 
     if removeNominalStrength is not None:
       self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), removeNominalStrength)
@@ -1340,14 +1361,18 @@ class hrsObs:
     return self
   
   def prepareDataAirmass(self,
+    secondOrder=True,
+    refNum=None,
+    highPassFilter=False,
     doInjectSignal=False,
     injectedRelativeStrength=1,
     injectedKp=None, injectedVsys=None,
     normalizationScheme='divide_col',
     removeNominalStrength=None
   ):
-    self.trimData()
-    self.alignData()
+    print('noTrim')
+    # self.trimData()
+    self.alignData(refNum=refNum)
 
     if removeNominalStrength is not None:
       self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), removeNominalStrength)
@@ -1360,6 +1385,13 @@ class hrsObs:
     self.normalizeData(normalizationScheme)
 
     self.airmassFit()
+
+    if highPassFilter:
+      print('not implemented yet ya dingus')
+
+    if secondOrder:
+      self.secondOrderAirmassFit(doPlot=False)
+
     self.applyMask()
     self.varianceWeight()
     self.applyMask()
