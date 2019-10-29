@@ -2,6 +2,7 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+import string
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
 
@@ -241,7 +242,7 @@ def findEdgeCuts_numeric(flux, edge=0, rightEdge=None, relative=True,
 
 def trimData(flux,
           applyRowCuts=None, applyColCuts=None, applyBothCuts=None,
-          rowCuts=None, colCuts=None, doAutoTrimCols=False, colTrimFunc=findEdgeCuts_xcor,
+          rowCuts=None, colCuts=None, manual=False, colTrimFunc=findEdgeCuts_xcor,
           neighborhood_size=30, gaussian_blur=10, edge=0, rightEdge=None, relative=True,
           plotResult=False, figsize=(8,6), figTitle=""
 ):
@@ -341,17 +342,19 @@ def trimData(flux,
   else:
     axs=[None,None]
 
-  if doAutoTrimCols:
-    leftEdge, rightEdge = colTrimFunc(flux, plotResult=plotResult, ax=axs[1],
-                            neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
-                            edge=edge, rightEdge=rightEdge, relative=relative)
-    flux = flux[...,leftEdge:rightEdge]
-    if applyColCuts is not None:
-      for i in range(len(applyColCuts)):
-        applyColCuts[i] = applyColCuts[i][...,leftEdge:rightEdge]
-    if applyBothCuts is not None:
-      for i in range(len(applyBothCuts)):
-        applyBothCuts[i] = applyBothCuts[i][...,leftEdge:rightEdge]
+  if manual:
+    colTrimFunc = findEdgeCuts_numeric
+
+  leftEdge, rightEdge = colTrimFunc(flux, plotResult=plotResult, ax=axs[1],
+                          neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
+                          edge=edge, rightEdge=rightEdge, relative=relative)
+  flux = flux[...,leftEdge:rightEdge]
+  if applyColCuts is not None:
+    for i in range(len(applyColCuts)):
+      applyColCuts[i] = applyColCuts[i][...,leftEdge:rightEdge]
+  if applyBothCuts is not None:
+    for i in range(len(applyBothCuts)):
+      applyBothCuts[i] = applyBothCuts[i][...,leftEdge:rightEdge]
 
   if plotResult:
     plt.tight_layout()
@@ -922,6 +925,128 @@ def sysrem(data, error, nCycles=1,
   else:
     return allResiduals[-1]
 
+def airmassFit(data, airmass, deg=2, log=False, returnFit=False):
+  '''
+    As described in section 3.4 of Brogi+ 2016
+  '''
+
+  dataToFit = data
+  if log:
+    dataToFit = np.log(data)
+
+  coeff = np.polyfit(airmass, data, deg)
+  coeff = np.flip(coeff,0)
+
+  inputs = np.array([np.power(airmass,d) for d in range(deg+1)])
+  fit = coeff.T.dot(inputs)
+
+  if log:
+    fit = np.exp(fit)
+
+  fittedData = data/fit.T
+
+  if returnFit:
+    return fittedData, fit
+
+  return fittedData
+
+def getResidualTelluricColumns(data, rawData, n_lines=3, neighborhood_size=20,
+  edgeTolerance=10, doPlot=False, title=''
+):
+  '''
+    Locates column index of deep tellurics with high variance after cleaning stages
+  '''
+
+  # First, we find positions of telluric lines from the unprocessed data
+  rawSpectra = np.median(rawData, 0)
+  rawSpectraMinima = getLocalMinima(rawSpectra, neighborhood_size)
+
+  leftEdgeIdx = (rawSpectraMinima < edgeTolerance)
+  rightEdgeIdx = (rawSpectraMinima > len(rawSpectra) - edgeTolerance)
+  edgeIndicies = np.where((leftEdgeIdx | rightEdgeIdx))
+  rawSpectraMinima = np.delete(rawSpectraMinima, edgeIndicies)
+
+  # identify columns with high residual variance
+  residualVariances = np.var(data, 0)
+  highVariancePixels = getLocalMaxima(residualVariances, neighborhood_size)
+
+  # match columns with high residual variance with the tellurics
+  telluricResiduals = np.array(intersection(rawSpectraMinima, highVariancePixels))
+
+  # Identify deepest tellurics with high residuals
+  # select deepest n_lines columns
+  deepResiduals = telluricResiduals[np.argsort(rawSpectra[telluricResiduals])]
+
+  if doPlot:
+    normalizedRV = normalize(residualVariances)
+    normalizedRS = normalize(rawSpectra, (0.3,1))
+    
+    plt.figure()
+    plt.plot(normalizedRV)
+    plt.plot(normalizedRS)
+
+    plt.scatter(rawSpectraMinima, normalizedRS[rawSpectraMinima], 100, 'r', label='spectra Minima')
+    plt.scatter(highVariancePixels, normalizedRV[highVariancePixels], 50, 'g', label='high variance')
+
+    plt.scatter(deepResiduals, normalizedRS[deepResiduals],50,'y', label='intersection')
+
+    for i in range(n_lines):
+      try:
+        linePosition = deepResiduals[i]
+        if i == 0:
+          plt.plot((linePosition,linePosition),(-.1,1.1), 'k--', label='Marked Columns')
+        else:
+          plt.plot((linePosition,linePosition),(-.1,1.1), 'k--')
+      except IndexError:
+        continue
+
+    plt.legend()
+    plt.title(title)
+    plt.show()
+
+  deepResiduals = deepResiduals[:n_lines]
+  return deepResiduals
+
+def sampleTelluricResiduals(data, telluricColumn, rawData,
+  width=4, upSampleFactor=1000
+):
+  '''
+    Samples the data residuals at the precise position of telluric lines
+  '''
+  rawSpectra = np.median(rawData,0)
+  preciseCenter = findCenterOfPeakSpline(rawSpectra, telluricColumn,
+    0, width, upSampleFactor)
+
+  residuals = []
+  x = np.arange(-width, width+1)
+  upSampX = np.linspace(x[0], x[-1], len(x)*upSampleFactor)
+  indexOfCenter = closestArgmin(np.array([preciseCenter-telluricColumn]),
+    upSampX)[0]
+
+  for i in range(len(data)):
+    y = data[i][telluricColumn-width:telluricColumn+width+1]
+    upSampX, upSampY = upSampleData(x,y, upSampleFactor)
+
+    residuals.append(upSampY[indexOfCenter])
+
+  return residuals
+
+def secondOrderAirmassFit(data, rawData, n_lines=3, manualLines=None, doPlot=False,title=''):
+  if manualLines is None:
+    telluricColumns = getResidualTelluricColumns(data, rawData, n_lines, doPlot=doPlot,title=title)
+  else:
+    telluricColumns = manualLines
+
+  predictors = [sampleTelluricResiduals(data, col, rawData) for col in telluricColumns]
+  predictors.append(np.ones(len(data)))
+  predictors = np.array(predictors).T
+
+  coeff = np.linalg.lstsq(predictors, data)[0]
+  fit = predictors.dot(coeff)
+
+  corrected = data - fit
+  return corrected
+
 def varianceWeighting(data, axis=-2):
   '''
     Weights the data by the variance along axis, default is -2
@@ -990,6 +1115,8 @@ def generateFakeSignal(data, wavelengths, unitRVs, barycentricCorrection,
 
   # To mimick the different spacing, we apply a mean filter across the fakeSignal and then interpolate it down to the observation wavelength grid
   # Similar to binning on wavelength grid, better than straight interpolation
+  # why
+  # convolution?
   spacingDifference = int(np.round(getSpacing(wavelengths)/getSpacing(fakeSignalWave)))
   averagedFakeSignal = ndi.generic_filter(fakeSignalData, np.mean, spacingDifference)
 
@@ -1679,6 +1806,43 @@ def plotData(data, xAxis=None, yAxis=None, xlabel='Index', ylabel='Index',
     plt.savefig(saveName)
 
   plt.show()
+
+def multiPanelPlot(*panels, xAxis=None, yAxis=None,
+  xlabel='Index', ylabel='Index', panelLabels=None,
+  yticks=None, xticks=None, cmap='viridis'
+):
+  nPanels = len(panels)
+
+  # Set yAxis to frame number if none provided
+  if yAxis is None:
+    yAxis = np.arange(np.shape(panels)[1])
+
+  if xAxis is None:
+    xAxis = np.arange(np.shape(panels)[2])
+
+  if yticks is None:
+    yticks = np.linspace(yAxis[0],yAxis[-1],5)[:-1]
+
+  if panelLabels is None:
+    panelLabels = string.ascii_uppercase[:nPanels]
+
+  fig = plt.figure()
+  fig.subplots_adjust(hspace=0,wspace=0)
+
+  for i in range(nPanels):
+    ax = plt.subplot(nPanels, 1, (i+1))
+
+    plt.pcolormesh(xAxis, yAxis, panels[i], cmap=cmap)
+    plt.axis('tight')
+    if i != nPanels-1:
+      plt.xticks([])
+    elif xticks is not None:
+      plt.xticks(xticks)
+
+    plt.yticks(yticks)
+    plt.text(1,1,panelLabels[i],transform=ax.transAxes,
+      fontsize=16, weight='bold',
+      bbox=dict(facecolor='none', edgecolor='k'))
 
 def plotTemplateVsOrders(templateWave, templateFlux, orderWaves,
                          orderNames = None, xlabel='Wavelength (um)',
