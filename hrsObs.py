@@ -39,7 +39,8 @@ class hrsObs:
   '''
   def __init__(self,
                 planet=None, instrument=None, date=None, order=None,
-                template='default', dbPath='jsondb.json', path=None
+                template='default', dbPath='jsondb.json', path=None,
+                load=False, saveName=None, topDir='data/', useGenericPath=True
   ):
     '''
       Initialize an observation.
@@ -60,6 +61,13 @@ class hrsObs:
     self._instrument = instrument
     self._date = date
     self._order = order
+
+    if load:
+      if saveName is None:
+        raise ValueError('saveName must not be None.')
+
+      self.load(saveName, topDir, useGenericPath, path)
+      return
 
     self.updateDatabase(initialize=True)
     if template is 'default':
@@ -230,6 +238,31 @@ class hrsObs:
     '''
 
     return list(self.__dict__.keys())
+
+  def getDefaultSavePath(self, topDir='data/'):
+    return topDir+f'{self._planet}/{self._date}/order_{self._order}/'
+
+  def save(self, saveName, topDir='data/'):
+    savePath = self.getDefaultSavePath(topDir)
+    makePaths(savePath)
+    fileName = savePath+saveName
+    if fileName[-7:] != '.pickle':
+      fileName = fileName + '.pickle'
+
+    with open(fileName, 'wb') as f:
+      pickle.dump(self, f)
+
+  def load(self, saveName, topDir='data/', useGenericPath=True, path=False):
+    if useGenericPath:
+      path = self.getDefaultSavePath(topDir)
+
+    fileName = path + saveName
+    if fileName[-7:] != '.pickle':
+      fileName = fileName + '.pickle'
+
+    loaded = readFile(fileName)
+    for key,value in loaded.__dict__.items():
+      setattr(self, key, value)
 
   def initializeDatabase(self):
     '''
@@ -1370,8 +1403,7 @@ class hrsObs:
     normalizationScheme='divide_col',
     removeNominalStrength=None
   ):
-    print('noTrim')
-    # self.trimData()
+    self.trimData()
     self.alignData(refNum=refNum)
 
     if removeNominalStrength is not None:
