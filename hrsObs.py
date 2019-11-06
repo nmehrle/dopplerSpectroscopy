@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 
 from scipy import ndimage as ndi
 from scipy import interpolate
+from astropy import units as u
 
 from pathos.multiprocessing import ProcessingPool as Pool
 from functools import partial
@@ -160,7 +161,8 @@ class hrsObs:
     self.updateDatabase()
 
     try:
-      templateFile = self.templateDB['directory'] + self.templateDB[value]['file']
+      templateDB = self.templateDB[value]
+      templateFile = self.templateDB['directory'] + templateDB['file']
     except AttributeError:
       if self.planet is None:
         raise AttributeError('Must specify planet before template.')
@@ -170,9 +172,9 @@ class hrsObs:
       raise KeyError('Template "'+str(value)+'" not defined for planet "'+str(self.planet)+'".')
 
     try:
-      templateUnits = self.templateDB[value]['units']
-    except:
-      raise KeyError('Units not specified for template "' + str(value) + '". Please enter the value used to convert to microns into the database, i.e. if the template data is in angstroms, enter 10000.')
+      templateWaveUnits = templateDB['wave_units']
+    except KeyError:
+      raise KeyError('Wavelength units not specified for template "' + str(value) + '". Please enter the value used to convert to microns into the database, i.e. if the template data is in angstroms, enter 10000.')
 
     try:
       templateData = readFile(templateFile)
@@ -181,17 +183,22 @@ class hrsObs:
     except FileNotFoundError:
       raise FileNotFoundError('Template File "'+str(templateFile)+'" not found.')
 
+    try:
+      templateFluxUnits = templateDB['flux_units']
+    except KeyError:
+      raise KeyError('Flux units not specified for template "' + str(value) + '". Please enter the value used to convert to erg/s/cm^2/um. i.e. if the template data is in erg/s/cm^2/cm, enter 10000')
+
     self._template = value
 
     try:
-      self.templateWave = templateData['wavelengths']/templateUnits
-      self.templateFlux = templateData['flux']
+      self.templateWave = templateData['wavelengths']/templateWaveUnits
+      self.templateFlux = 10**templateData['flux']/templateFluxUnits
     except IndexError:
       # template was .csv format
-      self.templateWave = templateData[:,0]/templateUnits
-      self.templateFlux = templateData[:,1]
+      self.templateWave = templateData[:,0]/templateWaveUnits
+      self.templateFlux = 10**templateData[:,1]/templateFluxUnits
 
-    self.templateResolution = self.templateDB[value]['resolution']
+    self.templateResolution = templateDB['resolution']
     if self.templateResolution == 0:
       self.templateResolution = None
 
@@ -318,6 +325,8 @@ class hrsObs:
 
       self.orbParams         = database['orbitalParamters']
       self.starName          = database['starName']
+      self.starParams        = database['starParams']
+      self.planetParams      = database['planetParams']
       self.templateDB        = database['templates']
 
       self.templates         = list(database['templates'].keys())
@@ -561,6 +570,14 @@ class hrsObs:
 
     return rvs
 
+  def getObservedVelocities(self, kp=None, vsys=None, unitPrefix=1000):
+    if kp is None:
+      kp = self.getNominalKp()
+    if vsys is None:
+      vsys = self.getNominalVsys()
+
+    return kp*self.getRVs(unitRVs=True) + self.barycentricCorrection/unitPrefix + vsys
+
   def getPhases(self):
     return getRV(self.times, **self.orbParams, returnPhase=True)
 
@@ -573,6 +590,27 @@ class hrsObs:
 
   def getNominalVsys(self):
     return self.orbParams['v_sys']
+
+  def getLowResTemplate(self):
+    templateMedW = np.median(self.templateWave)
+    R_template = self.templateResolution
+    if R_template is None:
+      R_template = templateMedW/getSpacing(self.templateWave)
+    obsMedW = np.median(self.wavelengths)
+
+    lowResTemplate = reduceSpectralResolution(self.templateWave, self.templateFlux, self.resolution,
+                                              R_template, obsMedW)
+
+    return lowResTemplate
+
+  def getStellarModel(self, blackbody=True):
+    '''
+    '''
+    #TODO implement phoenix models
+    if blackbody:
+      return blackbodyFlux(self.wavelengths, self.starParams['teff']).value
+    else:
+      raise ValueError('Blackbody=False not yet implemented')
   ###
 
   #-- Processing Data
@@ -884,8 +922,19 @@ class hrsObs:
   ###
 
   #-- Comparing to Template
-  def injectFakeSignal(self, injectedKp, injectedVsys, relativeStrength,
+  def getFakePlanetSignal(self, injectedKp, injectedVsys, fudgeFactor=1,
     unitPrefix=1000, verbose=False
+  ):
+    lowResTemplate = self.getLowResTemplate()
+    observedVelocities = self.getObservedVelocities(injectedKp, injectedVsys, unitPrefix)
+
+    fakePlanetSignal = hru.generatePlanetSignal(lowResTemplate, self.templateWave, self.wavelengths,
+      observedVelocities, unitPrefix, verbose=verbose)
+
+    return fakePlanetSignal
+
+  def injectFakeSignal(self, injectedKp, injectedVsys, fudgeFactor=1,
+    Rp=None, unitPrefix=1000, verbose=False
   ):
     '''
       Injects the template signal into the data at the specified location and strength.
@@ -903,28 +952,26 @@ class hrsObs:
 
         verbose (bool): If true, prints progress bar
     '''
-    templateMedW = np.median(self.templateWave)
-    R_template = self.templateResolution
-    if R_template is None:
-      R_template = templateMedW/getSpacing(self.templateWave)
-    obsMedW = np.median(self.wavelengths)
+    stellarModel = self.getStellarModel()
+    if Rp is None:
+      Rp = self.planetParams['radius'] #Jupiter radius
 
-    lowResTemplate = reduceSpectralResolution(self.templateWave, self.templateFlux, self.resolution,
-                                              R_template, obsMedW)
+    Rs = self.starParams['radius'] * getUnitRatio(u.R_sun, u.R_jup) #Jupiter radius
 
-    fakeSignal = hru.generateFakeSignal(self.data, self.wavelengths, self.getRVs(unitRVs=True),
-                                        self.barycentricCorrection, injectedKp, injectedVsys, lowResTemplate,
-                                        self.templateWave, relativeStrength=relativeStrength,
-                                        unitPrefix=unitPrefix, verbose=verbose, returnInjection=False)
+    fakePlanetSignal = self.getFakePlanetSignal(injectedKp, injectedVsys, fudgeFactor,
+      unitPrefix, verbose)
+
+    fakeSignal = hru.generateFakeData(self.data, fakePlanetSignal, stellarModel, Rp/Rs,
+      fudgeFactor=fudgeFactor, doInject=False)
 
     newData = self.data + fakeSignal
-    self.log.append(f'Injected Fake Signal at {injectedKp}, {injectedVsys}, '+np.format_float_scientific(relativeStrength))
+    self.log.append(f'Injected Fake Signal at {injectedKp}, {injectedVsys}, fudge::'+np.format_float_scientific(fudgeFactor))
 
     self.data = newData
     self.injection = {}
     self.injection['Kp'] = injectedKp
     self.injection['Vsys'] = injectedVsys
-    self.injection['relativeStrength'] = relativeStrength
+    self.injection['fudgeFactor'] = fudgeFactor
 
   def generateXCM(self, normalizeXCM=True, unitPrefix=1000, xcorMode='same', verbose=False):
     '''
@@ -1274,10 +1321,9 @@ class hrsObs:
     lfTrendMode=0,
     highPassFilter=False, hpKernel=65,
     #injectData
-    doInjectSignal=False, injectedKp=None, injectedVsys=None,
-    subtractSignal=False,
-    removeNominal=False,
-    injectedRelativeStrength=None, unitPrefix=1000,
+    doInjectSignal=False, removeNominal=False,
+    injectedKp=None, injectedVsys=None,
+    fudgeFactor=None, Rp=None, unitPrefix=1000,
     #normalize
     normalizationScheme='divide_row',polyOrder=2,
     #generateMask
@@ -1318,11 +1364,10 @@ class hrsObs:
 
       if removeNominal:
         self.injectFakeSignal(injectedKp=self.getNominalKp(), injectedVsys=self.getNominalVsys(),
-          relativeStrength=1, subtract=True, unitPrefix=unitPrefix)
+          fudgeFactor= -1, Rp=Rp, unitPrefix=unitPrefix)
 
       self.injectFakeSignal(injectedKp=injectedKp, injectedVsys=injectedVsys,
-                            relativeStrength=injectedRelativeStrength,
-                            subtract=subtractSignal,
+                            fudgeFactor=fudgeFactor, Rp=Rp,
                             unitPrefix=unitPrefix, verbose=verbose)
 
     self.generateMask(use_time_mask=use_time_mask, use_wave_mask=use_wave_mask, plotResult=plotMasks,
@@ -1371,21 +1416,21 @@ class hrsObs:
 
   def prepareDataGeneric(self,
     refNum=None,
-    doInjectSignal=False,
-    injectedRelativeStrength=1,
-    injectedKp=None, injectedVsys=None,
     normalizationScheme='divide_all',
-    removeNominalStrength=None
+    removeNominal=False,
+    doInjectSignal=False,
+    injectedKp=None, injectedVsys=None,
+    fudgeFactor=1, Rp=None
   ):
     self.trimData()
     self.alignData(refNum=refNum)
 
-    if removeNominalStrength is not None:
-      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), removeNominalStrength)
+    if removeNominal:
+      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=-1, Rp=Rp)
 
     if doInjectSignal:
       self.injectFakeSignal(injectedKp, injectedVsys,
-        injectedRelativeStrength)
+        fudgeFactor=fudgeFactor, Rp=Rp)
 
     self.generateMask()
     self.normalizeData(normalizationScheme)
@@ -1397,21 +1442,22 @@ class hrsObs:
     secondOrder=True,
     refNum=None,
     highPassFilter=False,
-    doInjectSignal=False,
-    injectedRelativeStrength=1,
-    injectedKp=None, injectedVsys=None,
     normalizationScheme='divide_col',
-    removeNominalStrength=None
+
+    removeNominal=False,
+    doInjectSignal=False,
+    injectedKp=None, injectedVsys=None,
+    fudgeFactor=1, Rp=None
   ):
     self.trimData()
     self.alignData(refNum=refNum)
 
     if removeNominalStrength is not None:
-      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), removeNominalStrength)
+      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=-1, Rp=Rp)
 
     if doInjectSignal:
       self.injectFakeSignal(injectedKp, injectedVsys,
-        injectedRelativeStrength)
+        fudgeFactor=fudgeFactor, Rp=Rp)
 
     self.generateMask()
     self.normalizeData(normalizationScheme)

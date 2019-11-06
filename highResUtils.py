@@ -1068,91 +1068,46 @@ def varianceWeighting(data, axis=-2):
 
 #-- Comparing Data to template
 # TODO - write comment
-def generateFakeSignal(data, wavelengths, unitRVs, barycentricCorrection,
-                       fakeKp, fakeVsys, fakeSignalData, fakeSignalWave,
-                       relativeStrength=None, unitPrefix=1, returnInjection=False,
-                       kernel=51, verbose=False
+def generatePlanetSignal(modelFlux, modelWavelengths, observedWavelengths, observedVelocities,
+  unitPrefix=1000, verbose=False
 ):
   '''
-    Generates a fake signal from the provided orbital solution/signal data.
-    For each spectrum in data, interpolates the provided signal onto the wavelengths probed
-    by that observation, and sets it at a magnitude of relativeStrength * (median of that spectrum)
-
-    Parameters:
-      data (2d-array): Time series of spectra
-
-      wavelengths (1d-array): wavelengths observed by the detector, wavelength axis for data
-
-      unitRVs (1d-array): Radial velocities of the planet at times of observations normalized so
-                          Kp = 1, v_sys = 0
-
-      barycentricCorrection (1d-array): Barycentric velocity correction at times of observation in m/s
-
-      fakeKp (float): Kp value to inject fake signal at in units of unitPrefix
-
-      fakeVsys (float): Vsys value to inject fake signal at in units of unitPrefix
-
-      fakeSignalData (1d-array): Fluxs of signal to create fake data from.
-
-      fakeSignalWave (1d-array): Wavelengths for fakeSignalData
-
-      relativeStrength (float): Magnitude of fake signal to be created, relative to the median values of spectra
-                                in data. I.e. a spectrum in fakeSignal will have max value of median of corresponding spectrum in data
-
-      unitPrefix (float): Units of velocity divided by meter/second.
-        i.e. unitPrefix = 1000 implies velocity is in km/s
-             unitPrefix = (1000 / 86400) implies velocity is km/day
-
-      returnInjection (bool): If true, return data+fakeSignal, otherwise return just fakeSignal
-
-      verbose (bool): If true, show progress bar
-
-    Returns:
-      fakeSignal (2d-array): Fake signal as it would be observed by the detector
-
-      injectedSignal (2d-array): If returnInjection, returns fakeSignal+data
   '''
-
-  # To mimick the different spacing, we apply a mean filter across the fakeSignal and then interpolate it down to the observation wavelength grid
+  # To mimick the different spacing, we apply a mean filter across the model and then interpolate it down to the observation wavelength grid
   # Similar to binning on wavelength grid, better than straight interpolation
   # why
   # convolution?
-  spacingDifference = int(np.round(getSpacing(wavelengths)/getSpacing(fakeSignalWave)))
-  averagedFakeSignal = ndi.generic_filter(fakeSignalData, np.mean, spacingDifference)
+  spacingDifference = int(np.round(getSpacing(observedWavelengths)/getSpacing(modelWavelengths)))
+  averagedModel = ndi.generic_filter(modelFlux, np.mean, spacingDifference)
 
   # Interpolate the fake signal over it's wavelengths
-  signalInterp = interpolate.splrep(fakeSignalWave, averagedFakeSignal)
+  signalInterp = interpolate.splrep(modelWavelengths, averagedModel)
 
-  # Generate the fake planet velocities over this observation
-  velocities = fakeKp * unitRVs + barycentricCorrection/unitPrefix + fakeVsys
-
-  seq = velocities
+  planetSignal = []
+  seq = observedVelocities
   if verbose:
-    seq = tqdm(velocities, desc='Injecting Fake Signal')
+    seq = tqdm(observedVelocities, desc='Calculating Doppler Shifts')
 
-  fakeSignal = []
   for vel in seq:
     # Calculate wavelengths in source frame that correspond to this observation
-    sourceWave = doppler(wavelengths, vel, unitPrefix=unitPrefix)
+    sourceWave = doppler(observedWavelengths, vel, unitPrefix=unitPrefix)
     thisFlux = interpolate.splev(sourceWave, signalInterp)
-    fakeSignal.append(thisFlux)
+    planetSignal.append(thisFlux)
 
-  lowFreqTrends = np.apply_along_axis(signal.medfilt, 1, data, kernel)
-  channelFraction = lowFreqTrends / np.max(lowFreqTrends,1)[:,np.newaxis]
+  return np.array(planetSignal)
 
-  fluxFraction = np.median(data,1)
-  fluxFraction = fluxFraction/np.max(fluxFraction)
+def generateFakeData(observedData, planetSignal, stellarModel, Rp_over_Rs,
+  fudgeFactor=1, doInject=True
+):
+  '''
+  '''
+  scaling = (observedData / stellarModel) * (Rp_over_Rs)**2
+  fakeData = fudgeFactor * planetSignal * scaling
 
-  fakeSignal = fakeSignal - np.median(fakeSignal,1)[:,np.newaxis]
-  fakeSignal = fakeSignal * channelFraction
-  fakeSignal = fakeSignal * fluxFraction[:,np.newaxis]
+  if doInject:
+    return observedData + fakeData
 
-  fakeSignal = fakeSignal * relativeStrength
-
-  if returnInjection:
-    return fakeSignal+data
-
-  return fakeSignal
+  return fakeData
 
 def generateXCM(data, template,
                 normalizeXCM=True,

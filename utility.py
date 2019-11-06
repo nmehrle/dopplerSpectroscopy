@@ -790,9 +790,9 @@ def assertUnits(x, x_units, x_default=None):
 
 
 
-def blackbody(w, T, w_units=u.micron):
+def blackbodyFlux(w, T, w_units=u.micron):
   '''
-    Returns the spectral radiance per unit wavelength (B_lambda) for a blackbody at temperature T, 
+    Returns the spectral flux density (per unit wavelength) for a blackbody at temperature T, 
     over wavelengths w. Wrapper for astropy.modelinig.blackbody.blackbody_lambda
 
     Parameters:
@@ -808,49 +808,25 @@ def blackbody(w, T, w_units=u.micron):
 
     Returns:
       B_lambda (same as w): spectral radiance per unit wavelength for input wavelengths
-          units: erg cm^-2 s^-1 Angstrom^-1
+          units: erg cm^-2 s^-1 w_unit^-1
   '''
 
   # assert w has units
   w = assertUnits(w, w_units, u.m)
 
-  return blackbody_lambda(w, T)
+  u_radiance = u.erg / (u.s * u.sr * u.cm**2)
+  u_spec_rad = u_radiance / (w_units)
 
-def getBlackBodyFlux(T, w=None, w_units=u.micron):
-  '''
-  '''
+  spec_rad = blackbody_lambda(w,T).to(u_spec_rad)
+  spec_flux_dens = spec_rad * np.pi * u.sr
 
-  # if no wavelength specified, run stefan boltzmann eq
-  if w is None:
-
-    # Check if T has units, or else apply kelvin
-    try:
-      T.unit
-    except AttributeError:
-      # T needs units
-
-      T = T*u.Kelvin
-
-    flux = constants.sigma_sb * T
-
-  # Wavelength region specified - integrate blackbody radiance times pi
-  else:
-    # assert first w has units
-    w = assertUnits(w, w_units, u.m)
-
-    radiancePerW = blackbody(w, T) #erg / AA / s/ cm^2
-
-    w_AA = w.to(u.Angstrom)
-    radiance = np.trapz(radiancePerW, w_AA) #erg s^-1 cm^-2 sr^-1
-    flux = radiance * np.pi * u.sr
-
-  return flux
+  return spec_flux_dens
 
 def getBlackBodyLuminosity(T, R, w=None, w_units=u.micron, R_units=u.R_sun):
   '''
   '''
 
-  flux = getBlackBodyFlux(T, w, w_units)
+  flux = blackbodyFlux(T, w, w_units)
 
   # Assert units of R
   R = assertUnits(R, R_units, u.R_sun)
@@ -858,4 +834,6 @@ def getBlackBodyLuminosity(T, R, w=None, w_units=u.micron, R_units=u.R_sun):
   luminosity = flux * np.pi * (R**2)
   return luminosity
 
+def getUnitRatio(a, b):
+  return (1 * a / b).decompose().value
 ###
