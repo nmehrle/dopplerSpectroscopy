@@ -77,11 +77,13 @@ class Collection:
 
     # Unless an injection is specified, assume noInject
     self.injectedSignal = False
-    self.injectionStrength = None
     self.injectionKp = None
     self.injectionVsys = None
-    self.injectionTemplate = None
 
+    self.injectionRp = None
+    self.injectionFudgeFactor = None
+
+    self.injectionTemplate = None
     self.removeNominalStrength=None
 
     if targetKp is None:
@@ -160,12 +162,18 @@ class Collection:
       else:
         self._targetVsys = self.injectionVsys
 
-  def setInjection(self, injectionKp, injectionVsys, injectionStrength=1):
+  def setInjection(self, injectionKp, injectionVsys, injectionRp=None, injectionFudgeFactor=1):
+    if injectionRp is None:
+      injectionRp = self.getExpectedRp()
+
     self.injectedSignal = True
     self.injectionKp = injectionKp
     self.injectionVsys = injectionVsys
+
+    self.injectionRp = injectionRp
+    self.injectionFudgeFactor = injectionFudgeFactor
+
     self.injectionTemplate = self.template
-    self.injectionStrength = injectionStrength
 
     if self.autoSetTargetKp:
       self._targetKp = injectionKp
@@ -174,7 +182,7 @@ class Collection:
       self._targetVsys = injectionVsys
 
     topDir = self.rootDir + f'inject_{self.template}/'+str(injectionKp)+'_'+str(injectionVsys)+'/'
-    topDir = topDir + getInjectionString(injectionStrength, asPath=True)
+    topDir = topDir + self.getInjectionString(asPath=True)
     self.topDir = topDir
     self.targetPath = getTargetPath(self.targetKp, self.targetVsys, self.topDir)
     self.setObsList()
@@ -190,7 +198,7 @@ class Collection:
     strength = -1*np.abs(strength)
     self.removeNominalStrength = strength
 
-    removeNominalString = f'removeNominal_{strength:.2f}/'
+    removeNominalString = f'removeNominal/level_{strength:.2f}/'
     topDir = self.rootDir + removeNominalString + self.topDir.split(self.rootDir)[1]
     self.topDir = topDir
 
@@ -198,10 +206,11 @@ class Collection:
     self.setObsList()
 
   def clearRemoveNominal(self):
-    if self.removeNominalStrength is None:
+    strength = self.removeNominalStrength
+    if strength is None:
       return
 
-    removeNominalString = f'removeNominal_{self.removeNominalStrength:.2f}/'
+    removeNominalString = f'removeNominal/level_{strength:.2f}/'
     self.removeNominalStrength = None
 
     self.topDir = ''.join(self.topDir.split(removeNominalString))
@@ -210,10 +219,13 @@ class Collection:
 
   def clearInjection(self):
     self.injectedSignal = False
-    self.injectionStrength = None
+    
     self.injectionTemplate = None
     self.injectionKp = None
     self.injectionVsys = None
+
+    self.injectionRp = None
+    self.injectionFudgeFactor = None
 
     self.autoSetTargetParams()
 
@@ -281,19 +293,33 @@ class Collection:
     del testObs
     return ret
 
-  def getInjectionStrengths(self):
-    injectionStrengths = []
-    try:
-      for subPath in os.listdir(self.topDir):
-        if os.path.isdir(self.topDir+subPath):
-          injectionStrengths.append(subPath)
-    except FileNotFoundError as e:
-      raise FileNotFoundError(f"Path {topDir} does not exist, no Injection Strengths found")
+  def getExpectedRp(self):
+    testObs = hrsObs(self.planet, dbPath=self.dbName)
+    Rp = testObs.planetParams['radius']
+    del testObs
+    return Rp
 
-    if injectionStrengths == []:
-      raise ValueError(f'No injectionStrengths found for {topDir}.')
+  def getInjectionString(self, asPath=True):
+    '''
+    '''
+    if not self.injectedSignal:
+      if asPath:
+        return ''
+      else:
+        return 'None'
 
-    return injectionStrengths
+    if self.injectionRp == self.getExpectedRp() and self.injectionFudgeFactor == 1:
+      if asPath:
+        return ''
+      else:
+        return 'Nominal'
+
+    injString = f'{self.injectionRp}_{self.injectionFudgeFactor}'
+
+    if asPath:
+      return injString+'/'
+    else:
+      return injString
 
   def getSysremParams(self,
     targetKp=None, targetVsys=None,
@@ -350,7 +376,8 @@ class Collection:
     sysremDict['injectedSignal'] = self.injectedSignal
     sysremDict['injectionKp'] = self.injectionKp
     sysremDict['injectionVsys'] = self.injectionVsys
-    sysremDict['injectionStrength'] = self.injectionStrength
+    sysremDict['injectionRp'] = self.injectionRp
+    sysremDict['injectionFudgeFactor'] = self.injectionFudgeFactor
     sysremDict['injectionTemplate'] = self.injectionTemplate
 
     sysremDict['kpSearchExtent'] = kpSearchExtent
@@ -421,7 +448,7 @@ class Collection:
 
     doPlotSigMat=True,
     xlim=[-100,100], ylim=None,
-    nDecimal=2,
+    cmap='viridis', nDecimal=2,
 
     normalize=True,
     normalizeRowByRow=True,
@@ -446,7 +473,8 @@ class Collection:
     saveDict['injectedSignal'] = self.injectedSignal
     saveDict['injectionKp'] = self.injectionKp
     saveDict['injectionVsys'] = self.injectionVsys
-    saveDict['injectionStrength'] = self.injectionStrength
+    saveDict['injectionRp'] = self.injectionRp
+    saveDict['injectionFudgeFactor'] = self.injectionFudgeFactor
 
     if instrument is None:
       instrument = self.instruments
@@ -461,7 +489,8 @@ class Collection:
     saveDict['order'] = order
 
     title = self.planet+' '+self.template
-    title += '\nInjection: '+getInjectionString(self.injectionStrength, asPath=False)
+    title += '\nInjection: '+self.getInjectionString(asPath=False)
+    title += f'@ {self.injectionVsys},{self.injectionKp}'
     saveDict['title'] = title
 
     with open(saveName+'.pickle','wb') as f:
@@ -476,7 +505,7 @@ class Collection:
       hru.plotSigMat(data, crossCorVels, kpRange,
         targetKp=targetKp, targetVsys=targetVsys,
         title=title, xlim=xlim, ylim=ylim,
-        nDecimal=nDecimal,
+        cmap=cmap, nDecimal=nDecimal,
         saveName=saveName+'.png')
 
   #-- Main
@@ -487,6 +516,7 @@ class Collection:
     highPassFilter=None,
     secondOrder=True,
     refNum=None,
+    normalizationScheme='divide_col',
 
     normalizeRowByRow=True,
     normalizeByPercentiles=True,
@@ -508,12 +538,14 @@ class Collection:
       highPassFilter=highPassFilter,
       secondOrder=secondOrder,
       refNum=refNum,
+      normalizationScheme=normalizationScheme,
       removeNominalStrength=self.removeNominalStrength,
 
       doInjectSignal=self.injectedSignal,
-      injectedRelativeStrength=self.injectionStrength,
       targetKp=self.targetKp,
       targetVsys=self.targetVsys,
+      injectionRp=self.injectionRp,
+      injectionFudgeFactor=self.injectionFudgeFactor,
 
       normalizeRowByRow=normalizeRowByRow,
       normalizeByPercentiles=normalizeByPercentiles,
@@ -543,6 +575,7 @@ class Collection:
 
     prepareFunction=None,
     highPassFilter=None,
+    refNum=None,
 
     excludeZeroIterations=True,
     kpSearchExtent=5, vsysSearchExtent=1,
@@ -567,15 +600,17 @@ class Collection:
       prepareFunction=prepareFunction,
       highPassFilter=highPassFilter,
       removeNominalStrength=self.removeNominalStrength,
+      refNum=refNum,
 
       kpSearchExtent=kpSearchExtent,
       vsysSearchExtent=vsysSearchExtent,
       maxIterations=maxIterations,
 
       doInjectSignal=self.injectedSignal,
-      injectedRelativeStrength=self.injectionStrength,
       targetKp=self.targetKp,
       targetVsys=self.targetVsys,
+      injectionRp=self.injectionRp,
+      injectionFudgeFactor=self.injectionFudgeFactor,
 
       outputVelocities=outputVelocities,
       dbName=self.dbName,
@@ -714,6 +749,7 @@ class Collection:
     outputVelocities = np.arange(-500,500),
 
     doPlotSigMat=True, nDecimal=2,
+    cmap='viridis',
     xlim=[-100,100], ylim=None,
 
     normalize=True,
@@ -813,7 +849,7 @@ class Collection:
         targetKp=targetKp, targetVsys=targetVsys,
 
         doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
-        nDecimal=nDecimal,
+        cmap=cmap, nDecimal=nDecimal,
         normalize=normalize,
         normalizeRowByRow=normalizeRowByRow,
         normalizeByPercentiles=normalizeByPercentiles
@@ -833,7 +869,7 @@ class Collection:
             date=date, order=orders,
 
             doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
-            nDecimal=nDecimal,
+            cmap=cmap, nDecimal=nDecimal,
             normalize=normalize,
             normalizeRowByRow=normalizeRowByRow,
             normalizeByPercentiles=normalizeByPercentiles
@@ -854,7 +890,7 @@ class Collection:
             order=self.orders[self.instruments.index(inst)],
 
             doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
-            nDecimal=nDecimal,
+            cmap=cmap, nDecimal=nDecimal,
             normalize=normalize,
             normalizeRowByRow=normalizeRowByRow,
             normalizeByPercentiles=normalizeByPercentiles
@@ -1235,32 +1271,101 @@ class Collection:
       targetKp=self.targetKp, targetVsys=self.targetVsys,
                   xlim=xlim, ylim=ylim, saveName=sn)
 
+  def sumSysremTest(self,
+    kpr=None,
+    outputVelocities=np.arange(-500,500,1),
+    excludeZeroIterations=True,
+    divMean=False,
+    divStd=True,
+    normalizeToHist=True,
+    sysremFilePrefix='sysIt_',
+    sn=None,
+    histsn=None,
+    xlim=[-100,100],
+    ylim=None
+  ):
+    allDates = [item for sublist in self.dates for item in sublist]
+    dateSigMats = []
+    dateCCVs = []
+    for date in allDates:
+      dateSigMats.append([])
+      dateCCVs.append([])
+
+    allSigMats = []
+    allCCVs = []
+
+    for obsInfo in tqdm(self.obsList, desc='calculating'):
+      orderSigMats = []
+      dateIndex = allDates.index(obsInfo['date'])
+
+      for file in os.listdir(obsInfo['path']):
+        if sysremFilePrefix not in file:
+          continue
+
+        fileName = obsInfo['path']+file
+        with open(fileName, 'rb') as f:
+          obs = pickle.load(f)
+
+        orderSigMats.append(obs.unNormedSigMat)
+
+        if kpr is None:
+          kpr = obs.kpRange
+
+      if excludeZeroIterations:
+        orderMaxSigMat = np.sum(orderSigMats[1:],0)
+      else:
+        orderMaxSigMat = np.sum(orderSigMats,0)
+
+      dateSigMats[dateIndex].append(orderMaxSigMat)
+      dateCCVs[dateIndex].append(obs.crossCorVels)
+
+      allSigMats.append(orderMaxSigMat)
+      allCCVs.append(obs.crossCorVels)
+
+    for i in range(len(dateSigMats)):
+      dateSigMats[i] = hru.addMatricies(dateSigMats[i], dateCCVs[i], outputVelocities)
+
+    masterSigMat = hru.addMatricies(allSigMats, allCCVs, outputVelocities)
+
+    # experimental
+    master = copy.deepcopy(masterSigMat)
+    if divMean:
+      master = master/np.median(master,1)[:,np.newaxis]
+    if divStd:
+      master = hru.normalizeSigMat(master, rowByRow=True, byPercentiles=True)
+    # 
+    vals = master.flatten()
+    vals.sort()
+    mu,std = norm.fit(vals)
+
+    plt.figure()
+    plt.hist(vals,density=True,bins=50)
+
+    pltx = np.linspace(np.min(vals),np.max(vals),200)
+    plt.plot(pltx,norm.pdf(pltx,mu,std))
+    plt.plot((mu,mu),(0,.5),'k',lw=4)
+    plt.plot((mu+std,mu+std),(0,.4),'k--',lw=4)
+    plt.plot((mu+2*std,mu+2*std),(0,.3),'k--',lw=4)
+    plt.plot((mu+3*std,mu+3*std),(0,.2),'k--',lw=4)
+    plt.plot((mu+4*std,mu+4*std),(0,.1),'k--',lw=4)
+    plt.plot((mu+5*std,mu+5*std),(0,.1),'k--',lw=4)
+
+    plt.plot((np.max(master),np.max(master)),(0,.1),'r--',lw=6)
+    if histsn is not None:
+      plt.savefig(histsn)
+
+    if normalizeToHist:
+      master = master - mu
+      master = master/std
+
+    hru.plotSigMat(master, outputVelocities, kpr,
+      targetKp=self.targetKp, targetVsys=self.targetVsys,
+                  xlim=xlim, ylim=ylim, saveName=sn)
+
   # TODO
   def makeLargeXCM():
     return 3
   ###
-
-def getInjectionString(injectionStrength, nDecimal=1, asPath=True):
-  if injectionStrength is None:
-    if asPath:
-      return ''
-    else:
-      return 'None'
-
-  if isinstance(injectionStrength,str):
-    injString = injectionStrength
-  else:
-    if np.abs(injectionStrength) <= 100:
-      injString = f'{np.abs(injectionStrength):.{nDecimal}f}'
-    else:
-      injString = f'1e{np.log10(np.abs(injectionStrength)):.{nDecimal}f}'
-    if injectionStrength < 0:
-      injString = 'minus_'+injString
-
-  if asPath:
-    return injString+'/'
-  else:
-    return injString
 
 def getObsDataPath(template, date, order, topDir=None):
   subPath = template+'/'+date+f'/order_{order}/'
@@ -1288,10 +1393,12 @@ def airmassAnalysis(obs, kpRange,
   highPassFilter=None,
   secondOrder=True,
   refNum=None,
+  normalizationScheme='divide_col',
 
   doInjectSignal=False,
-  injectedRelativeStrength=1,
   targetKp=None, targetVsys=None,
+  injectionRp=None,
+  injectionFudgeFactor=None,
   removeNominalStrength=None,
 
   normalizeRowByRow=True,
@@ -1314,17 +1421,20 @@ def airmassAnalysis(obs, kpRange,
       refNum=refNum,
       highPassFilter=highPassFilter,
       doInjectSignal=doInjectSignal,
-      injectedRelativeStrength=injectedRelativeStrength,
       injectedKp=targetKp,
       injectedVsys=targetVsys,
+      injectionRp=injectionRp,
+      injectionFudgeFactor=injectionFudgeFactor,
       removeNominalStrength=removeNominalStrength
     )
   else:
     prepareFunction(obs,
+      normalizationScheme=normalizationScheme,
       doInjectSignal=doInjectSignal,
-      injectedRelativeStrength=injectedRelativeStrength,
       injectedKp=targetKp,
       injectedVsys=targetVsys,
+      injectionRp=injectionRp,
+      injectionFudgeFactor=injectionFudgeFactor,
       removeNominalStrength=removeNominalStrength
     )
 
@@ -1345,11 +1455,13 @@ def generateSysremIterations(obs, kpRange,
   prepareFunction=None,
   highPassFilter=None,
   hpKernel=65,
+  refNum=None,
 
   outputVelocities=None,
 
   doInjectSignal=False,
-  injectedRelativeStrength=1,
+  injectionRp=None,
+  injectionFudgeFactor=None,
   targetKp=None, targetVsys=None,
 
   removeNominalStrength=None,
@@ -1365,10 +1477,12 @@ def generateSysremIterations(obs, kpRange,
 
   if prepareFunction is None:
     obs.prepareDataGeneric(
+      refNum=refNum,
       doInjectSignal=doInjectSignal,
-      injectedRelativeStrength=injectedRelativeStrength,
       injectedKp=targetKp,
       injectedVsys=targetVsys,
+      injectionRp=injectionRp,
+      injectionFudgeFactor=injectionFudgeFactor,
       removeNominalStrength=removeNominalStrength
     )
 
@@ -1384,10 +1498,11 @@ def generateSysremIterations(obs, kpRange,
   else:
     prepareFunction(obs,
       doInjectSignal=doInjectSignal,
-      injectedRelativeStrength=injectedRelativeStrength,
       injectedKp=targetKp,
       injectedVsys=targetVsys,
-      removeNominalStrength=removeNominalStrength
+      injectionRp=injectionRp,
+      injectionFudgeFactor=injectionFudgeFactor,
+      removeNominalStrength=self.removeNominalStrength
     )
 
   allSysremData = hru.sysrem(obs.data, obs.error,
