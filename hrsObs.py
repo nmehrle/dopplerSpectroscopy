@@ -1420,17 +1420,19 @@ class hrsObs:
     removeNominal=False,
     doInjectSignal=False,
     injectedKp=None, injectedVsys=None,
-    fudgeFactor=1, Rp=None
+    injectionFudgeFactor=1, injectionRp=None,
+    removeNominalStrength=None
   ):
     self.trimData()
     self.alignData(refNum=refNum)
 
     if removeNominal:
-      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=-1, Rp=Rp)
+      strength = -1 * np.abs(removeNominalStrength)
+      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=strength, Rp=injectionRp)
 
     if doInjectSignal:
       self.injectFakeSignal(injectedKp, injectedVsys,
-        fudgeFactor=fudgeFactor, Rp=Rp)
+        fudgeFactor=injectionFudgeFactor, Rp=injectionRp)
 
     self.generateMask()
     self.normalizeData(normalizationScheme)
@@ -1447,17 +1449,19 @@ class hrsObs:
     removeNominal=False,
     doInjectSignal=False,
     injectedKp=None, injectedVsys=None,
-    fudgeFactor=1, Rp=None
+    injectionFudgeFactor=1, injectionRp=None,
+    removeNominalStrength=None
   ):
     self.trimData()
     self.alignData(refNum=refNum)
 
     if removeNominalStrength is not None:
-      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=-1, Rp=Rp)
+      strength = -1 * np.abs(removeNominalStrength)
+      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=strength, Rp=injectionRp)
 
     if doInjectSignal:
       self.injectFakeSignal(injectedKp, injectedVsys,
-        fudgeFactor=fudgeFactor, Rp=Rp)
+        fudgeFactor=injectionFudgeFactor, Rp=injectionRp)
 
     self.generateMask()
     self.normalizeData(normalizationScheme)
