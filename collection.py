@@ -443,6 +443,7 @@ class Collection:
   def saveCombinedData(self, data, crossCorVels, kpRange, saveName,
     saveDict={},
 
+    newTemplate=None,
     targetKp=None, targetVsys=None,
     instrument=None, date=None, order=None,
 
@@ -460,12 +461,17 @@ class Collection:
     if targetVsys is None:
       targetVsys = self.targetVsys
 
+    if newTemplate is None:
+      template = self.template
+    else:
+      template = newTemplate
+
     saveDict['sigMat'] = data
     saveDict['crossCorVels'] = crossCorVels
     saveDict['kpRange'] = kpRange
 
     saveDict['planet'] = self.planet
-    saveDict['template'] = self.template
+    saveDict['template'] = template
 
     saveDict['targetKp'] = targetKp
     saveDict['targetVsys'] = targetVsys
@@ -488,7 +494,7 @@ class Collection:
       order = self.orders
     saveDict['order'] = order
 
-    title = self.planet+' '+self.template
+    title = self.planet+' '+template
     title += '\nInjection: '+self.getInjectionString(asPath=False)
     title += f'@ {self.injectionVsys},{self.injectionKp}'
     saveDict['title'] = title
@@ -734,8 +740,10 @@ class Collection:
   def combineData(self,
     mode='sysrem',
 
+    newTemplate=None,
     saveDatesAndInstruments=False,
-    doSave=True, returnSigMat=False,
+    doSave=True,
+    returnSigMat=False,
     savePath='combined', explicitSavePath=False,
     saveName=None,
 
@@ -807,7 +815,13 @@ class Collection:
       seq = tqdm(self.obsList, desc='Loading Data')
 
     for obsData in seq:
-      template = obsData['template']
+      if newTemplate is None:
+        template = obsData['template']
+        path     = obsData['path']
+      else:
+        template = newTemplate
+        path     = obsData['path'].replace(obsData['template'], newTemplate)
+
       inst = obsData['instrument']
       date = obsData['date']
       order = obsData['order']
@@ -821,7 +835,7 @@ class Collection:
       else:
         fileName = airmassFileName
 
-      obs = readFile(obsData['path']+fileName+'.pickle')
+      obs = readFile(path+fileName+'.pickle')
       sigMat = obs.unNormedSigMat
       ccvs   = obs.crossCorVels
 
@@ -840,12 +854,13 @@ class Collection:
 
     allData = hru.addMatricies(*allData, outputVelocities)
     if saveName is None:
-      saveName = self.template
+      saveName = template
     dataSaveName = fullSavePath+saveName
 
     if doSave:
       self.saveCombinedData(allData, outputVelocities, obs.kpRange,
         dataSaveName, saveDict=saveDict,
+        newTemplate=newTemplate,
         targetKp=targetKp, targetVsys=targetVsys,
 
         doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
@@ -865,6 +880,7 @@ class Collection:
 
           self.saveCombinedData(dateData, outputVelocities, obs.kpRange,
             dateSaveName, saveDict=saveDict,
+            newTemplate=newTemplate,
             targetKp=targetKp, targetVsys=targetVsys,
             date=date, order=orders,
 
@@ -885,6 +901,7 @@ class Collection:
 
           self.saveCombinedData(instData, outputVelocities, obs.kpRange,
             instSaveName, saveDict=saveDict,
+            newTemplate=newTemplate,
             targetKp=targetKp, targetVsys=targetVsys,
             instrument=inst, date=self.dates[self.instruments.index(inst)],
             order=self.orders[self.instruments.index(inst)],
@@ -906,7 +923,7 @@ class Collection:
     cores=1,
     filePrefix='sysIt_', fileSuffix='.pickle',
 
-    doOptimizeIterations=True, excludeZeroIterations=True,
+    excludeZeroIterations=True,
     kpSearchExtent=5, vsysSearchExtent=1,
     sysremSaveName='sysrem', sysremComment=None,
 
@@ -917,10 +934,8 @@ class Collection:
 
     obsList = self.obsList
 
-    if doOptimizeIterations:
-      allDates = [item for sublist in self.dates for item in sublist]
-
-      sysremDict = createNestedDict([newTemplate], allDates)
+    allDates = [item for sublist in self.dates for item in sublist]
+    sysremDict = createNestedDict([newTemplate], allDates)
 
     pbar = tqdm(total=self.pbarLength, desc='Calculating')
 
@@ -931,9 +946,10 @@ class Collection:
       topDir=self.topDir,
       filePrefix=filePrefix,
       fileSuffix=fileSuffix,
-      doOptimizeIterations=doOptimizeIterations,
-      targetKp=self.targetKp, targetVsys=self.targetVsys,
-      kpSearchExtent=kpSearchExtent, vsysSearchExtent=vsysSearchExtent,
+      targetKp=self.targetKp,
+      targetVsys=self.targetVsys,
+      kpSearchExtent=kpSearchExtent,
+      vsysSearchExtent=vsysSearchExtent,
       normalizeXCM=normalizeXCM,
       outputVelocities=outputVelocities,
       **kwargs
@@ -941,37 +957,32 @@ class Collection:
 
     if cores > 1:
       pool = mp.Pool(processes=cores)
-      seq = pool.imap_unordered(partialFunc, range(len(completeObsList)))
+      seq = pool.imap_unordered(partialFunc, range(len(obsList)))
     else:
       seq = []
-      for i in range(len(completeObsList)):
+      for i in range(len(obsList)):
         seq.append(partialFunc(i))
         pbar.update()
 
     for detStrengthList, obsData in seq:
-      if doOptimizeIterations:
-        if excludeZeroIterations:
-          optIts = np.argmax(detStrengthList[1:])+1
-        else:
-          optIts = np.argmax(detStrengthList)
+      if excludeZeroIterations:
+        optIts = np.argmax(detStrengthList[1:])+1
+      else:
+        optIts = np.argmax(detStrengthList)
 
-        sysremDict[obsData['newTemplate']][obsData['date']][obsData['order']] = optIts
+      sysremDict[newTemplate][obsData['date']][obsData['order']] = optIts
 
       if cores>1:
         pbar.update()
 
-    if doOptimizeIterations:
-      self.saveSysrem(sysremDict,
-        saveName=sysremSaveName, comment=sysremComment,
-        extraKeys={'maxIterations': maxIterations},
-        kpSearchExtent=kpSearchExtent,
-        vsysSearchExtent=vsysSearchExtent
-      )
-      pbar.close()
-      return sysremDict
-    else:
-      pbar.close()
-  
+    self.saveSysrem(sysremDict,
+      saveName=sysremSaveName, comment=sysremComment,
+      kpSearchExtent=kpSearchExtent,
+      vsysSearchExtent=vsysSearchExtent
+    )
+    pbar.close()
+    return sysremDict
+
   # super level
   def getDetectionStrength(self,
     targetKp=None, targetVsys=None,
@@ -1706,9 +1717,9 @@ def mpGetDetectionStrengths(i, obsList, **kwargs):
 def mpAnalyzeWithNewTemplate(i, obsList, newTemplate, kpRange,
   topDir, **kwargs
 ):
-  date              = obsList[i]['date']
-  order             = obsList[i]['order']
-  loadDataDir       = obsList[i]['path']
+  date        = obsList[i]['date']
+  order       = obsList[i]['order']
+  loadDataDir = obsList[i]['path']
 
   saveDataDir = getObsDataPath(newTemplate, date, order, topDir)
   makePaths(saveDataDir)
