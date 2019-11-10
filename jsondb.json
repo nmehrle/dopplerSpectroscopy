@@ -20,19 +20,12 @@
       "radius": 1.6
     },
     "templates": {
+      "wave_units": 10000,
+      "flux_units": 10000,
+      "resolution": 0,
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
-      "default": {
-        "file": "wasp33.pickle",
-        "wave_units": 10000,
-        "flux_units": 10000,
-        "resolution": 0
-      },
-      "negative": {
-        "file": "wasp33_negative.pickle",
-        "wave_units": 10000,
-        "flux_units": 10000,
-        "resolution": 0
-      }
+      "default": "wasp33.pickle",
+      "negative": "wasp33_negative.pickle"
     },
     "instruments": {
       "aries": {
@@ -106,31 +99,14 @@
       "radius": 1.3
     },
     "templates": {
+      "wave_units": 10000,
+      "flux_units": 10000,
+      "resolution": 0,
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
-      "inverted": {
-        "file": "upsand-invert.pickle",
-        "wave_units": 10000,
-        "flux_units": 10000,
-        "resolution": 0
-      },
-      "non-inverted": {
-        "file": "upsand-noinvert.pickle",
-        "wave_units": 10000,
-        "flux_units": 10000,
-        "resolution": 0
-      },
-      "inverted-extended": {
-        "file": "upsand-invert-extended.csv",
-        "wave_units": 10000,
-        "flux_units": 10000,
-        "resolution": 0
-      },
-      "non-inverted-extended": {
-        "file": "upsand-noinvert-extended.csv",
-        "wave_units": 10000,
-        "flux_units": 10000,
-        "resolution": 0
-      }
+      "inverted": "upsand-invert.pickle",
+      "non-inverted": "upsand-noinvert.pickle",
+      "inverted-extended": "upsand-invert-extended.csv",
+      "non-inverted-extended": "upsand-noinvert-extended.csv"
     },
     "instruments":{
       "aries": {

@@ -161,8 +161,8 @@ class hrsObs:
     self.updateDatabase()
 
     try:
-      templateDB = self.templateDB[value]
-      templateFile = self.templateDB['directory'] + templateDB['file']
+      templateDB = self.templateDB
+      templateFile = templateDB['directory'] + templateDB[value]
     except AttributeError:
       if self.planet is None:
         raise AttributeError('Must specify planet before template.')
@@ -329,8 +329,10 @@ class hrsObs:
       self.planetParams      = database['planetParams']
       self.templateDB        = database['templates']
 
-      self.templates         = list(database['templates'].keys())
-      self.templates.remove('directory')
+      templatesList = list(database['templates'].keys())
+      otherKeys = ['directory','wave_units', 'flux_units', 'resolution']
+      templatesList = [t for t in templatesList if t not in otherKeys]
+      self.templates = templatesList
 
       self.instruments = list(database['instruments'].keys())
 
