@@ -191,12 +191,18 @@ class hrsObs:
     self._template = value
 
     try:
-      self.templateWave = templateData['wavelengths']/templateWaveUnits
-      self.templateFlux = 10**templateData['flux']/templateFluxUnits
+      templateWave = templateData['wavelengths']
+      templateFlux = templateData['flux']
     except IndexError:
       # template was .csv format
-      self.templateWave = templateData[:,0]/templateWaveUnits
-      self.templateFlux = 10**templateData[:,1]/templateFluxUnits
+      templateWave = templateData[:,0]/templateWaveUnits
+      templateFlux = templateData[:,1]
+
+    if templateData['log']:
+      templateFlux = 10**templateFlux
+
+    self.templateFlux = templateFlux/templateFluxUnits
+    self.templateWave = templateWave/templateWaveUnits
 
     self.templateResolution = templateDB['resolution']
     if self.templateResolution == 0:
@@ -330,7 +336,7 @@ class hrsObs:
       self.templateDB        = database['templates']
 
       templatesList = list(database['templates'].keys())
-      otherKeys = ['directory','wave_units', 'flux_units', 'resolution']
+      otherKeys = ['directory','wave_units', 'flux_units', 'resolution', 'log']
       templatesList = [t for t in templatesList if t not in otherKeys]
       self.templates = templatesList
 

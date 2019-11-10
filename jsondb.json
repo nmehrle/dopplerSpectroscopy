@@ -23,6 +23,7 @@
       "wave_units": 10000,
       "flux_units": 10000,
       "resolution": 0,
+      "log": 1,
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
       "default": "wasp33.pickle",
       "negative": "wasp33_negative.pickle"
@@ -102,6 +103,7 @@
       "wave_units": 10000,
       "flux_units": 10000,
       "resolution": 0,
+      "log": 1,
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
       "inverted": "upsand-invert.pickle",
       "non-inverted": "upsand-noinvert.pickle",
