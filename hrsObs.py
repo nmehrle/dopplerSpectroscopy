@@ -198,7 +198,7 @@ class hrsObs:
       templateWave = templateData[:,0]/templateWaveUnits
       templateFlux = templateData[:,1]
 
-    if templateData['log']:
+    if templateDB['log']:
       templateFlux = 10**templateFlux
 
     self.templateFlux = templateFlux/templateFluxUnits
