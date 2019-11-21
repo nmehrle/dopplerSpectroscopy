@@ -170,6 +170,8 @@ class hrsObs:
         raise AttributeError('templateFiles not found for planet "'+str(self.planet)+'". Please check validity of database.')
     except KeyError:
       raise KeyError('Template "'+str(value)+'" not defined for planet "'+str(self.planet)+'".')
+    except TypeError:
+      templateFile = templateDB['directory'] + self.readTemplateGrid(value)
 
     try:
       templateWaveUnits = templateDB['wave_units']
@@ -177,16 +179,19 @@ class hrsObs:
       raise KeyError('Wavelength units not specified for template "' + str(value) + '". Please enter the value used to convert to microns into the database, i.e. if the template data is in angstroms, enter 10000.')
 
     try:
-      templateData = readFile(templateFile)
-    except ValueError:
-      raise ValueError('Problem with database entry: template "'+str(value)+'", file "'+str(templateFile)+'" not supported.')
-    except FileNotFoundError:
-      raise FileNotFoundError('Template File "'+str(templateFile)+'" not found.')
-
-    try:
       templateFluxUnits = templateDB['flux_units']
     except KeyError:
       raise KeyError('Flux units not specified for template "' + str(value) + '". Please enter the value used to convert to erg/s/cm^2/um. i.e. if the template data is in erg/s/cm^2/cm, enter 10000')
+
+    try:
+      templateData = readFile(templateFile)
+    except ValueError:
+      try:
+        templateData = readFile(templateFile, delimiter=' ')
+      except ValueError:
+        raise ValueError('Problem with database entry: template "'+str(value)+'", file "'+str(templateFile)+'" not supported.')
+    except FileNotFoundError:
+      raise FileNotFoundError('Template File "'+str(templateFile)+'" not found.')
 
     self._template = value
 
@@ -195,7 +200,7 @@ class hrsObs:
       templateFlux = templateData['flux']
     except IndexError:
       # template was .csv format
-      templateWave = templateData[:,0]/templateWaveUnits
+      templateWave = templateData[:,0]
       templateFlux = templateData[:,1]
 
     if templateDB['log']:
@@ -265,9 +270,10 @@ class hrsObs:
     with open(fileName, 'wb') as f:
       pickle.dump(self, f)
 
-  def load(self, saveName, topDir='data/', useGenericPath=True, path=False):
+  def load(self, saveName, path='data/',
+    useGenericPath=True):
     if useGenericPath:
-      path = self.getDefaultSavePath(topDir)
+      path = self.getDefaultSavePath(path)
 
     fileName = path + saveName
     if fileName[-7:] != '.pickle':
@@ -276,6 +282,44 @@ class hrsObs:
     loaded = readFile(fileName)
     for key,value in loaded.__dict__.items():
       setattr(self, key, value)
+
+  def readTemplateGrid(self, value):
+    gridParams = self.getGridParams()
+    gridDB = self.templateDB['grid']
+
+    if len(value) != len(gridParams):
+      raise ValueError(f'Length of input must equal number of grid parameters: {len(gridParams)}')
+
+    templateFile = gridDB['directory']+gridDB['prefix']
+    delim = gridDB['delimiter']
+
+    for i,param in enumerate(gridParams):
+      try:
+        templateFile = templateFile+delim+param+'='+gridDB[param][value[i]]
+      except IndexError:
+        raise IndexError(f'Grid Param "{param}" only accepts {len(gridDB[param])} options, index {value[i]} out of range')
+
+    templateFile += delim+gridDB['suffix']
+
+    return templateFile
+
+  def getGridParams(self):
+    try:
+      gridDB = self.templateDB['grid']
+    except KeyError:
+      raise KeyError(f'No grid values specified for {self.planet}.')
+
+    gridInfoKeys = ['directory', 'prefix', 'suffix', 'delimiter']
+    gridParams = gridDB.keys()
+    gridParams = [k for k in gridParams if k not in gridInfoKeys]
+
+    return gridParams
+
+  def getModelGrid(self):
+    gridParams = self.getGridParams()
+    gridDB = self.templateDB['grid']
+    output = {param: gridDB[param] for param in gridParams}
+    return output
 
   def initializeDatabase(self):
     '''
@@ -323,6 +367,7 @@ class hrsObs:
 
     # Determine planet level parameters
     if self.planet is not None:
+      # bug where if planet is set already this code fails
       try:
         database = database[self.planet]
       except KeyError:
@@ -1423,6 +1468,7 @@ class hrsObs:
       self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
 
   def prepareDataGeneric(self,
+    dataName='default.pickle',
     refNum=None,
     normalizationScheme='divide_all',
     removeNominal=False,
