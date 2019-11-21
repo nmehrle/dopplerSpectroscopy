@@ -1,5 +1,6 @@
 import numpy as np
 import copy
+import itertools
 import multiprocessing as mp
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -257,23 +258,28 @@ class Collection:
 
     self.obsList = obsList
 
-  def getObs(self, index, sysremIterations=None):
+  def getObs(self, index, mode='sysrem',
+    sysremIterations=None, airmassFileName='airmass'
+  ):
     obsData = self.obsList[index]
     template = obsData['template']
     date = obsData['date']
     order = obsData['order']
 
-    if sysremIterations is None:
-      try:
-        sysremDict = self.getSysremParams()
-        sysremIterations = sysremDict[template][date][order]
-      except FileNotFoundError:
-        pass
-
-    try:
+    if mode == 'sysrem':
+      if sysremIterations is None:
+        try:
+          sysremDict = self.getSysremParams()
+          sysremIterations = sysremDict[template][date][order]
+        except FileNotFoundError:
+          raise FileNotFoundError(f"Could not find optimal Sysrem iterations for {template}, {date}, {order}")
       return readFile(obsData['path']+f'sysIt_{sysremIterations}.pickle')
-    except FileNotFoundError:
+    elif mode == 'airmass':
+      return readFile(obsData['path']+airmassFileName+'.pickle')
+    elif mode == 'raw':
       return hrsObs(obsData['planet'], obsData['instrument'], date, order, template, self.dbName)
+    else:
+      raise ValueError('Mode must be either "raw", "sysrem", or "airmass".')
 
   def setTarget(self, targetKp=None, targetVsys=None):
     if targetKp is not None:
@@ -299,22 +305,39 @@ class Collection:
     del testObs
     return Rp
 
-  def getInjectionString(self, asPath=True):
+  def getInjectionString(self, asPath=True,
+    injectedSignal=None,
+    injectionRp=None,
+    injectionFudgeFactor=None
+  ):
     '''
     '''
-    if not self.injectedSignal:
+    if injectedSignal is None:
+      injectedSignal = self.injectedSignal
+    if injectionRp is None:
+      if self.injectionRp is None:
+        injectionRp = self.getExpectedRp()
+      else:
+        injectionRp = self.injectionRp
+    if injectionFudgeFactor is None:
+      if self.injectionFudgeFactor is None:
+        injectionFudgeFactor = 1
+      else:
+        injectionFudgeFactor = self.injectionFudgeFactor
+
+    if not injectedSignal:
       if asPath:
         return ''
       else:
         return 'None'
 
-    if self.injectionRp == self.getExpectedRp() and self.injectionFudgeFactor == 1:
+    if injectionRp == self.getExpectedRp() and injectionFudgeFactor == 1:
       if asPath:
         return ''
       else:
         return 'Nominal'
 
-    injString = f'{self.injectionRp}_{self.injectionFudgeFactor}'
+    injString = f'{injectionRp}_{injectionFudgeFactor}'
 
     if asPath:
       return injString+'/'
@@ -323,29 +346,56 @@ class Collection:
 
   def getSysremParams(self,
     targetKp=None, targetVsys=None,
+
+    injection=False,
+    injectionTemplate=None,
+    injectionKp=None, injectionVsys=None,
+    injectionFudgeFactor=None,
+    injectionRp=None,
+
     sysremName='sysrem',
     sysremFilePrefix='sysIt_',
     sysremFileSuffix='.pickle',
   ):
     if targetKp is None:
-      targetKp = self.targetKp
+      if injection:
+        targetKp = injectionKp
+      else:
+        targetKp = self.targetKp
 
     if targetVsys is None:
-      targetVsys = self.targetVsys
+      if injection:
+        targetVsys = injectionVsys
+      else:
+        targetVsys = self.targetVsys
 
-    targetPath = getTargetPath(targetKp, targetVsys, self.topDir)
-    sysremDict = targetPath+sysremName+'.pickle'
+    if not injection:
+      targetPath = getTargetPath(targetKp, targetVsys, self.topDir)
+      sysremDict = targetPath+sysremName+'.pickle'
+    else:
+      if injectionTemplate is None:
+        injectionTemplate = self.template
+      injLocString = str(injectionKp)+'_'+str(injectionVsys)+'/'
+      injDir = self.rootDir + f'inject_{injectionTemplate}/'+injLocString
+      injDir = injDir + self.getInjectionString(injectedSignal=True, injectionRp=injectionRp,
+        injectionFudgeFactor=injectionFudgeFactor, asPath=True)
+
+      targetPath = getTargetPath(targetKp, targetVsys, injDir)
+      sysremDict = targetPath + sysremName+'.pickle'
 
     try:
       with open(sysremDict,'rb') as f:
         sysremDict = pickle.load(f)
     except FileNotFoundError as e:
-      sysremDict = self.calculateOptimizedSysrem(
-        targetKp=targetKp, targetVsys=targetVsys,
-        filePrefix=sysremFilePrefix,
-        fileSuffix=sysremFileSuffix,
-        sysremSaveName=sysremName
-      )
+      if injection:
+        raise e
+      else:
+        sysremDict = self.calculateOptimizedSysrem(
+          targetKp=targetKp, targetVsys=targetVsys,
+          filePrefix=sysremFilePrefix,
+          fileSuffix=sysremFileSuffix,
+          sysremSaveName=sysremName
+        )
 
     return sysremDict
 
@@ -411,7 +461,7 @@ class Collection:
             elif key == 'vsysSearchExtent' or key == 'kpSearchExtent':
               # overwrite old
               pass
-            elif key == self.template:
+            elif key == getTemplateString(self.template):
               # Merge Template:
               for dateKey in existantSysremDict[key]:
                 if dateKey in sysremDict[key]:
@@ -445,11 +495,13 @@ class Collection:
 
     newTemplate=None,
     targetKp=None, targetVsys=None,
+    injectionMarker=None,
     instrument=None, date=None, order=None,
 
     doPlotSigMat=True,
     xlim=[-100,100], ylim=None,
     cmap='viridis', nDecimal=2,
+    title=None,
 
     normalize=True,
     normalizeRowByRow=True,
@@ -462,9 +514,9 @@ class Collection:
       targetVsys = self.targetVsys
 
     if newTemplate is None:
-      template = self.template
+      template = getTemplateString(self.template)
     else:
-      template = newTemplate
+      template = getTemplateString(newTemplate)
 
     saveDict['sigMat'] = data
     saveDict['crossCorVels'] = crossCorVels
@@ -482,6 +534,9 @@ class Collection:
     saveDict['injectionRp'] = self.injectionRp
     saveDict['injectionFudgeFactor'] = self.injectionFudgeFactor
 
+    if injectionMarker is not None:
+      saveDict['comment'] = f"Sysrem parameters from injection at {injectionMarker}"
+
     if instrument is None:
       instrument = self.instruments
     saveDict['instrument'] = instrument
@@ -494,7 +549,9 @@ class Collection:
       order = self.orders
     saveDict['order'] = order
 
-    title = self.planet+' '+template
+    if title is None:
+      title = ''
+    title = self.planet+' '+template + ':: '+ title
     title += '\nInjection: '+self.getInjectionString(asPath=False)
     title += f'@ {self.injectionVsys},{self.injectionKp}'
     saveDict['title'] = title
@@ -512,6 +569,7 @@ class Collection:
         targetKp=targetKp, targetVsys=targetVsys,
         title=title, xlim=xlim, ylim=ylim,
         cmap=cmap, nDecimal=nDecimal,
+        injectionMarker=injectionMarker,
         saveName=saveName+'.png')
 
   #-- Main
@@ -680,7 +738,7 @@ class Collection:
       targetVsys = self.targetVsys
 
     allDates = [item for sublist in self.dates for item in sublist]
-    sysremDict = createNestedDict([self.template], allDates)
+    sysremDict = createNestedDict([getTemplateString(self.template)], allDates)
 
     if verbose:
       pbar = tqdm(total=self.pbarLength, desc='Optimizing Sysrem')
@@ -718,7 +776,7 @@ class Collection:
       else:
         optIts = np.argmax(detStrengthList)
 
-      sysremDict[obsData['template']][obsData['date']][obsData['order']] = optIts
+      sysremDict[getTemplateString(obsData['template'])][obsData['date']][obsData['order']] = optIts
 
       if cores > 1:
         if verbose:
@@ -757,8 +815,9 @@ class Collection:
     outputVelocities = np.arange(-500,500),
 
     doPlotSigMat=True, nDecimal=2,
-    cmap='viridis',
+    cmap='viridis', title=None,
     xlim=[-100,100], ylim=None,
+    injectionMarker=None,
 
     normalize=True,
     normalizeByPercentiles=True,
@@ -799,6 +858,8 @@ class Collection:
       fullSavePath = self.topDir+'airmass_'+savePath+'/'
       saveDict = {'sysrem': None, 'airmass': True}
 
+    if type(newTemplate) is list:
+            fullSavePath = fullSavePath+'grid/'
     # set savePath:
     if explicitSavePath:
       fullSavePath = savePath
@@ -816,11 +877,12 @@ class Collection:
 
     for obsData in seq:
       if newTemplate is None:
-        template = obsData['template']
+        template = getTemplateString(obsData['template'])
         path     = obsData['path']
       else:
-        template = newTemplate
-        path     = obsData['path'].replace(obsData['template'], newTemplate)
+        template = getTemplateString(newTemplate)
+        templatePath = getTemplateString(newTemplate, asPath=True)
+        path = obsData['path'].replace(obsData['template'], templatePath)
 
       inst = obsData['instrument']
       date = obsData['date']
@@ -864,8 +926,8 @@ class Collection:
         targetKp=targetKp, targetVsys=targetVsys,
 
         doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
-        cmap=cmap, nDecimal=nDecimal,
-        normalize=normalize,
+        cmap=cmap, nDecimal=nDecimal, title=title,
+        normalize=normalize, injectionMarker=injectionMarker,
         normalizeRowByRow=normalizeRowByRow,
         normalizeByPercentiles=normalizeByPercentiles
       )
@@ -876,7 +938,7 @@ class Collection:
           dateData = hru.addMatricies(dateData[0],dateData[1], outputVelocities)
           dateSavePath = fullSavePath+'dates/'
           makePaths(dateSavePath)
-          dateSaveName = dateSavePath+date+'_'+self.template
+          dateSaveName = dateSavePath+date+'_'+template
 
           self.saveCombinedData(dateData, outputVelocities, obs.kpRange,
             dateSaveName, saveDict=saveDict,
@@ -885,8 +947,8 @@ class Collection:
             date=date, order=orders,
 
             doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
-            cmap=cmap, nDecimal=nDecimal,
-            normalize=normalize,
+            cmap=cmap, nDecimal=nDecimal, title=title,
+            normalize=normalize, injectionMarker=injectionMarker,
             normalizeRowByRow=normalizeRowByRow,
             normalizeByPercentiles=normalizeByPercentiles
           )
@@ -897,7 +959,7 @@ class Collection:
           instSavePath = fullSavePath+'instruments/'
           spentmoneyonpokemongo=True
           makePaths(instSavePath)
-          instSaveName = instSavePath+inst+'_'+self.template
+          instSaveName = instSavePath+inst+'_'+template
 
           self.saveCombinedData(instData, outputVelocities, obs.kpRange,
             instSaveName, saveDict=saveDict,
@@ -907,8 +969,8 @@ class Collection:
             order=self.orders[self.instruments.index(inst)],
 
             doPlotSigMat=doPlotSigMat, xlim=xlim, ylim=ylim,
-            cmap=cmap, nDecimal=nDecimal,
-            normalize=normalize,
+            cmap=cmap, nDecimal=nDecimal, title=title,
+            normalize=normalize, injectionMarker=injectionMarker,
             normalizeRowByRow=normalizeRowByRow,
             normalizeByPercentiles=normalizeByPercentiles
           )
@@ -916,12 +978,10 @@ class Collection:
     if returnSigMat:
       return allData, outputVelocities, obs.kpRange
 
-  # verify
-  def applyNewTemplate(self,
-    newTemplate, kpRange,
-
+  def applyNewTemplate(self, newTemplate, kpRange,
     cores=1,
     filePrefix='sysIt_', fileSuffix='.pickle',
+    overwrite=False,
 
     excludeZeroIterations=True,
     kpSearchExtent=5, vsysSearchExtent=1,
@@ -933,9 +993,10 @@ class Collection:
   ):
 
     obsList = self.obsList
+    newTemplateString = getTemplateString(newTemplate)
 
     allDates = [item for sublist in self.dates for item in sublist]
-    sysremDict = createNestedDict([newTemplate], allDates)
+    sysremDict = createNestedDict([newTemplateString], allDates)
 
     pbar = tqdm(total=self.pbarLength, desc='Calculating')
 
@@ -943,6 +1004,7 @@ class Collection:
       obsList=obsList,
       newTemplate=newTemplate,
       kpRange=kpRange,
+      overwrite=overwrite,
       topDir=self.topDir,
       filePrefix=filePrefix,
       fileSuffix=fileSuffix,
@@ -970,7 +1032,7 @@ class Collection:
       else:
         optIts = np.argmax(detStrengthList)
 
-      sysremDict[newTemplate][obsData['date']][obsData['order']] = optIts
+      sysremDict[newTemplateString][obsData['date']][obsData['order']] = optIts
 
       if cores>1:
         pbar.update()
@@ -982,6 +1044,97 @@ class Collection:
     )
     pbar.close()
     return sysremDict
+
+  def gridTest(self, kpRange,
+    cores=1,
+    create=True,
+    overwrite=False,
+    outputVelocities=np.arange(-500,500),
+    mode='sysrem',
+    saveDatesAndInstruments=False,
+    excludeZeroIterations=True,
+    xlim=[-100,100], ylim=None
+  ):
+    obs = hrsObs(**self.obsList[0])
+    modelGrid = obs.getModelGrid()
+    templateList = []
+
+    templateList = []
+    for k,v in modelGrid.items():
+      templateList.append(list(range(len(v))))
+
+    templateList = list(itertools.product(*templateList))
+    
+    for gridTemplate in tqdm(templateList, desc='Running Templates'):
+      gridTemplate = list(gridTemplate)
+
+      if create:
+        try:
+          self.applyNewTemplate(gridTemplate, kpRange, cores=cores,
+            excludeZeroIterations=excludeZeroIterations,
+            outputVelocities=outputVelocities)
+        except RuntimeError as e:
+          print(f'Skipping grid f{gridTemplate} for error {e}')
+          pass
+      else:
+        self.combineData(mode=mode, newTemplate=gridTemplate, 
+          saveDatesAndInstruments=saveDatesAndInstruments,
+          outputVelocities=outputVelocities,
+          xlim=xlim, ylim=ylim, savePath='combined/grid/')
+
+  def injectionTests(self, kpRange,
+    kpList, vsysList,
+    injectionRp=None, injectionFudgeFactor=None,
+    cores=1,
+    create=True,
+    overwrite=False,
+    outputVelocities=np.arange(-500,500)
+  ):
+    print(1)
+
+  def plotInjectionLocations(self, kpList, vsysList,
+    saveDir='injection_tests/', airmassFileName='airmass',
+    clim=None, ylim=None, xlim=[-100,100]
+  ):
+    sigMat, ccvs, kpr = self.combineData('airmass',airmassFileName=airmassFileName,
+      returnSigMat=True, doSave=False)
+
+    plt.figure()
+    sigMat = hru.normalizeSigMat(sigMat, rowByRow=True, byPercentiles=True)
+    plt.pcolormesh(ccvs, kpr, sigMat, cmap='viridis', vmin=clim[0], vmax=clim[1])
+    cbar = plt.colorbar()
+
+    plt.title('Airmass result, Injection Locations Marked')
+    kp, vsys = self.getExpectedOrbParams()
+    plt.plot((vsys,vsys),(np.min(kpr),np.max(kpr)),'r--')
+    plt.plot((xlim[0],xlim[1]), (kp,kp), 'r--')
+    plt.scatter(vsysList, kpList, marker='o', color='k', s=50)
+    plt.axis('tight')
+    plt.xlim(xlim)
+    plt.ylim(ylim)
+    plt.ylabel('Kp (km/s)')
+    plt.xlabel('Vsys (km/s)')
+    cbar.set_label('S/N')
+    plt.tight_layout()
+    plt.savefig(self.topDir+saveDir+'injectionGuide.png')
+
+  def readInjectionTests(self, kpList, vsysList,
+    saveDir='injection_tests/',
+    airmassFileName='airmass',
+    clim=None, ylim=None, xlim=[-100,100]
+  ):
+    plotInjectionLocations(kpList, vsysList, saveDir, airmassFileName, clim, ylim, xlim)
+
+    for i in range(len(kpList)):
+      kp = kpList[i]
+      vsys = vsysList[i]
+      inj_sysremDict = self.getSysremParams(injection=True, injectionKp=kp, injectionVsys=vsys)
+      savePath = self.topDir+saveDir
+      saveName = f'{kp}_{vsys}'
+
+      self.combineData(savePath=savePath, explicitSavePath=True, saveName=saveName,
+        sysremDict=inj_sysremDict, title='sysrem: '+saveName,
+        ylim=ylim, xlim=xlim, injectionMarker=[vsys,kp])
 
   # super level
   def getDetectionStrength(self,
@@ -1191,8 +1344,11 @@ class Collection:
     if doSavePlot:
       plt.savefig(falsePositivePath+saveName+'.png')
 
-  def maxSysremTest(self,
+  def generalSysremTest(self,
     kpr=None,
+    func=np.max,
+    newTemplate=None,
+    plotHist=False,
     outputVelocities=np.arange(-500,500,1),
     excludeZeroIterations=True,
     divMean=False,
@@ -1218,11 +1374,18 @@ class Collection:
       orderSigMats = []
       dateIndex = allDates.index(obsInfo['date'])
 
-      for file in os.listdir(obsInfo['path']):
+      if newTemplate is None:
+        path     = obsInfo['path']
+      else:
+        template = getTemplateString(newTemplate)
+        templatePath = getTemplateString(newTemplate, asPath=True)
+        path = obsData['path'].replace(obsData['template'], templatePath)
+
+      for file in os.listdir(path):
         if sysremFilePrefix not in file:
           continue
 
-        fileName = obsInfo['path']+file
+        fileName = path+file
         with open(fileName, 'rb') as f:
           obs = pickle.load(f)
 
@@ -1232,9 +1395,9 @@ class Collection:
           kpr = obs.kpRange
 
       if excludeZeroIterations:
-        orderMaxSigMat = np.max(orderSigMats[1:],0)
+        orderMaxSigMat = func(orderSigMats[1:],0)
       else:
-        orderMaxSigMat = np.max(orderSigMats,0)
+        orderMaxSigMat = func(orderSigMats,0)
 
       dateSigMats[dateIndex].append(orderMaxSigMat)
       dateCCVs[dateIndex].append(obs.crossCorVels)
@@ -1253,117 +1416,26 @@ class Collection:
       master = master/np.median(master,1)[:,np.newaxis]
     if divStd:
       master = hru.normalizeSigMat(master, rowByRow=True, byPercentiles=True)
-    # 
+
     vals = master.flatten()
     vals.sort()
     mu,std = norm.fit(vals)
+    if plotHist:
+      plt.figure()
+      plt.hist(vals,density=True,bins=50)
 
-    plt.figure()
-    plt.hist(vals,density=True,bins=50)
+      pltx = np.linspace(np.min(vals),np.max(vals),200)
+      plt.plot(pltx,norm.pdf(pltx,mu,std))
+      plt.plot((mu,mu),(0,.5),'k',lw=4)
+      plt.plot((mu+std,mu+std),(0,.4),'k--',lw=4)
+      plt.plot((mu+2*std,mu+2*std),(0,.3),'k--',lw=4)
+      plt.plot((mu+3*std,mu+3*std),(0,.2),'k--',lw=4)
+      plt.plot((mu+4*std,mu+4*std),(0,.1),'k--',lw=4)
+      plt.plot((mu+5*std,mu+5*std),(0,.1),'k--',lw=4)
 
-    pltx = np.linspace(np.min(vals),np.max(vals),200)
-    plt.plot(pltx,norm.pdf(pltx,mu,std))
-    plt.plot((mu,mu),(0,.5),'k',lw=4)
-    plt.plot((mu+std,mu+std),(0,.4),'k--',lw=4)
-    plt.plot((mu+2*std,mu+2*std),(0,.3),'k--',lw=4)
-    plt.plot((mu+3*std,mu+3*std),(0,.2),'k--',lw=4)
-    plt.plot((mu+4*std,mu+4*std),(0,.1),'k--',lw=4)
-    plt.plot((mu+5*std,mu+5*std),(0,.1),'k--',lw=4)
-
-    plt.plot((np.max(master),np.max(master)),(0,.1),'r--',lw=6)
-    if histsn is not None:
-      plt.savefig(histsn)
-
-    if normalizeToHist:
-      master = master - mu
-      master = master/std
-
-    hru.plotSigMat(master, outputVelocities, kpr,
-      targetKp=self.targetKp, targetVsys=self.targetVsys,
-                  xlim=xlim, ylim=ylim, saveName=sn)
-
-  def sumSysremTest(self,
-    kpr=None,
-    outputVelocities=np.arange(-500,500,1),
-    excludeZeroIterations=True,
-    divMean=False,
-    divStd=True,
-    normalizeToHist=True,
-    sysremFilePrefix='sysIt_',
-    sn=None,
-    histsn=None,
-    xlim=[-100,100],
-    ylim=None
-  ):
-    allDates = [item for sublist in self.dates for item in sublist]
-    dateSigMats = []
-    dateCCVs = []
-    for date in allDates:
-      dateSigMats.append([])
-      dateCCVs.append([])
-
-    allSigMats = []
-    allCCVs = []
-
-    for obsInfo in tqdm(self.obsList, desc='calculating'):
-      orderSigMats = []
-      dateIndex = allDates.index(obsInfo['date'])
-
-      for file in os.listdir(obsInfo['path']):
-        if sysremFilePrefix not in file:
-          continue
-
-        fileName = obsInfo['path']+file
-        with open(fileName, 'rb') as f:
-          obs = pickle.load(f)
-
-        orderSigMats.append(obs.unNormedSigMat)
-
-        if kpr is None:
-          kpr = obs.kpRange
-
-      if excludeZeroIterations:
-        orderMaxSigMat = np.sum(orderSigMats[1:],0)
-      else:
-        orderMaxSigMat = np.sum(orderSigMats,0)
-
-      dateSigMats[dateIndex].append(orderMaxSigMat)
-      dateCCVs[dateIndex].append(obs.crossCorVels)
-
-      allSigMats.append(orderMaxSigMat)
-      allCCVs.append(obs.crossCorVels)
-
-    for i in range(len(dateSigMats)):
-      dateSigMats[i] = hru.addMatricies(dateSigMats[i], dateCCVs[i], outputVelocities)
-
-    masterSigMat = hru.addMatricies(allSigMats, allCCVs, outputVelocities)
-
-    # experimental
-    master = copy.deepcopy(masterSigMat)
-    if divMean:
-      master = master/np.median(master,1)[:,np.newaxis]
-    if divStd:
-      master = hru.normalizeSigMat(master, rowByRow=True, byPercentiles=True)
-    # 
-    vals = master.flatten()
-    vals.sort()
-    mu,std = norm.fit(vals)
-
-    plt.figure()
-    plt.hist(vals,density=True,bins=50)
-
-    pltx = np.linspace(np.min(vals),np.max(vals),200)
-    plt.plot(pltx,norm.pdf(pltx,mu,std))
-    plt.plot((mu,mu),(0,.5),'k',lw=4)
-    plt.plot((mu+std,mu+std),(0,.4),'k--',lw=4)
-    plt.plot((mu+2*std,mu+2*std),(0,.3),'k--',lw=4)
-    plt.plot((mu+3*std,mu+3*std),(0,.2),'k--',lw=4)
-    plt.plot((mu+4*std,mu+4*std),(0,.1),'k--',lw=4)
-    plt.plot((mu+5*std,mu+5*std),(0,.1),'k--',lw=4)
-
-    plt.plot((np.max(master),np.max(master)),(0,.1),'r--',lw=6)
-    if histsn is not None:
-      plt.savefig(histsn)
+      plt.plot((np.max(master),np.max(master)),(0,.1),'r--',lw=6)
+      if histsn is not None:
+        plt.savefig(histsn)
 
     if normalizeToHist:
       master = master - mu
@@ -1379,7 +1451,8 @@ class Collection:
   ###
 
 def getObsDataPath(template, date, order, topDir=None):
-  subPath = template+'/'+date+f'/order_{order}/'
+  subPath = getTemplateString(template, asPath=True)
+  subPath = subPath+'/'+date+f'/order_{order}/'
 
   if topDir is None:
     return subPath
@@ -1396,6 +1469,16 @@ def getTargetPath(targetKp, targetVsys, topDir=None):
     return subPath
   else:
     return topDir+subPath
+
+def getTemplateString(template, asPath=False):
+  if type(template) is list:
+    stringValues = [str(i) for i in template]
+    gridString = 'grid_'+''.join(stringValues)
+    if asPath:
+      return 'grid/'+gridString
+    return gridString
+
+  return template
 
 #-- Single Operations
 def airmassAnalysis(obs, kpRange,
@@ -1592,7 +1675,6 @@ def getDetectionStrengths(path,
     detStrengthList.append(detStr)
   return detStrengthList
 
-# verify
 def analyzeWithNewTemplate(pathToData,
   newTemplate, kpRange, saveDir=None,
   filePrefix='sysIt_', fileSuffix='.pickle',
@@ -1713,9 +1795,8 @@ def mpGetDetectionStrengths(i, obsList, **kwargs):
   detStrengthList = getDetectionStrengths(saveDir, **kwargs)
   return detStrengthList, obsList[i]
 
-# verify
 def mpAnalyzeWithNewTemplate(i, obsList, newTemplate, kpRange,
-  topDir, **kwargs
+  topDir, overwrite, **kwargs
 ):
   date        = obsList[i]['date']
   order       = obsList[i]['order']
@@ -1723,6 +1804,13 @@ def mpAnalyzeWithNewTemplate(i, obsList, newTemplate, kpRange,
 
   saveDataDir = getObsDataPath(newTemplate, date, order, topDir)
   makePaths(saveDataDir)
+
+  fn = saveDataDir+'sysIt_0.pickle'
+  if os.path.isfile(fn):
+    if overwrite:
+      print(f"Warning, overwriting data in {saveDataDir}!")
+    else:
+      raise RuntimeError('Data in "'+saveDataDir+'" already exists!')
 
   detStrengthList = analyzeWithNewTemplate(loadDataDir, newTemplate,
     kpRange, saveDir=saveDataDir, **kwargs)
