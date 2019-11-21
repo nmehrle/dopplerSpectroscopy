@@ -105,10 +105,17 @@
       "resolution": 0,
       "log": 1,
       "directory": "/dash/exobox/code/python/nmehrle/templates/",
-      "inverted": "upsand-invert.pickle",
-      "non-inverted": "upsand-noinvert.pickle",
-      "inverted-extended": "upsand-invert-extended.csv",
-      "non-inverted-extended": "upsand-noinvert-extended.csv"
+      "inverted": "upsand-invert-extended.csv",
+      "non-inverted": "upsand-noinvert-extended.csv",
+      "grid": {
+        "directory": "UpsAnd_grid/",
+        "prefix": "UpsAnd",
+        "suffix": "hires.csv",
+        "delimiter": ".",
+        "redist": ["0.250000", "0.500000", "1.00000"],
+        "z": ["0.00000", "1.00000"],
+        "c": ["7.66000", "8.35897"]
+      }
     },
     "instruments":{
       "aries": {
