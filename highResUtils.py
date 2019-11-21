@@ -1589,6 +1589,7 @@ def plotSigMat(sigMat=None, crossCorVels=None, kpRange=None,
                title='', simplePlot=False, saveName=None,
                unitStr='km/s', show=True,
                nDecimal=2,
+               injectionMarker=None,
                **kwargs
 ):
   '''
@@ -1640,6 +1641,9 @@ def plotSigMat(sigMat=None, crossCorVels=None, kpRange=None,
   plt.pcolormesh(pltXs, pltYs, windowed, cmap=cmap, vmin=clim[0], vmax=clim[1])
   cbar = plt.colorbar()
 
+  # Mark Injection Location:
+  if injectionMarker is not None:
+    plt.scatter(*injectionMarker, color='r', marker='v', s=60)
 
   # Mark Max Value
   maxIndex = np.unravel_index(windowed.argmax(), windowed.shape)
@@ -1675,6 +1679,8 @@ def plotSigMat(sigMat=None, crossCorVels=None, kpRange=None,
   cbar.set_label('Sigma')
 
   # format title
+  if title is None:
+    title = ''
   if title!='' and title[-1] != '\n':
     title+='\n'
   if not simplePlot:
