@@ -1503,12 +1503,6 @@ def airmassAnalysis(obs, kpRange,
 
   outputVelocities=None,
 ):
-  # Double check we've collected the data for obs
-  try:
-    obs.wavelengths
-  except AttributeError:
-    obs.collectRawData()
-
   if prepareFunction is None:
     obs.prepareDataAirmass(
       secondOrder=secondOrder,
@@ -1563,12 +1557,6 @@ def generateSysremIterations(obs, kpRange,
   saveDir=None,
   kpSearchExtent=5, vsysSearchExtent=1
 ):
-  # Double check we've collected the data for obs
-  try:
-    obs.wavelengths
-  except AttributeError:
-    obs.collectRawData()
-
   if prepareFunction is None:
     obs.prepareDataGeneric(
       refNum=refNum,

@@ -1468,6 +1468,7 @@ class hrsObs:
       self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
 
   def prepareDataGeneric(self,
+    loadData=False,
     dataName='default.pickle',
     refNum=None,
     normalizationScheme='divide_all',
@@ -1477,6 +1478,14 @@ class hrsObs:
     injectionFudgeFactor=1, injectionRp=None,
     removeNominalStrength=None
   ):
+    # Double check we've collected the data for this observation
+    try:
+      self.wavelengths
+    except AttributeError:
+      self.collectRawData()
+
+    # if loadData:
+      # self.load()
     self.trimData()
     self.alignData(refNum=refNum)
 
@@ -1506,6 +1515,12 @@ class hrsObs:
     injectionFudgeFactor=1, injectionRp=None,
     removeNominalStrength=None
   ):
+    # Double check we've collected the data for this observation
+    try:
+      self.wavelengths
+    except AttributeError:
+      self.collectRawData()
+
     self.trimData()
     self.alignData(refNum=refNum)
 
