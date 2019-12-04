@@ -716,6 +716,9 @@ def reduceSpectralResolution(x, y, R_low, R_high=None, lambda_mid=None, n=4):
     Returns:
       lowRes (array): Reduced resolution spectrum on same wavelength grid as x
   '''
+  if np.ndim(y) == 2:
+    return np.array([reduceSpectralResolution(x,spec,R_low,R_high,lambda_mid,n) for spec in y])
+
   dx = getSpacing(x)
 
   # If lambda_mid is none, take median of input wavelengths
