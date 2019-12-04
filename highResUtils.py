@@ -456,10 +456,11 @@ def calcCorrelationOffset(corr, ref_corr,
 
   return offsets
 
-def alignment(flux, ref, iterations = 1,
+def alignment(flux, ref,
              error=None, padLen = None,
              peak_half_width = 3, upSampleFactor = 1000,
-             returnOffset = False, verbose = False
+             returnOffset=False, plotOffset=False,
+             verbose=False
 ):
   '''
     Aligns the spectra in flux to the reference spectrum ref. 
@@ -492,14 +493,6 @@ def alignment(flux, ref, iterations = 1,
 
       shifted_error (2d-array): Error after alignment correction
   '''
-  if iterations <=0:
-    if error is not None:
-      return flux, error
-    return flux
-
-  if verbose and not returnOffset:
-    print(str(iterations) + ' alignment iterations remaining.')
-
   m,n = np.shape(flux)
 
   # Mean subtract for cross correlation
@@ -529,6 +522,14 @@ def alignment(flux, ref, iterations = 1,
                                 upSampleFactor=upSampleFactor,
                                 verbose=verbose)
 
+  if plotOffset:
+    plt.figure()
+    plt.plot(offsets)
+    plt.title('Pixel Offsets')
+    plt.ylabel('Offset')
+    plt.xlabel('Exposure #')
+    plt.show()
+
   if returnOffset:
     return offsets
 
@@ -542,9 +543,26 @@ def alignment(flux, ref, iterations = 1,
   # Un-fft and remove padding
   # replace means
   shifted_flux = np.fft.irfft(shifted_fft)[:,padLen:n+padLen] + row_means
-  return alignment(shifted_flux, ref, iterations=iterations-1,
-                    error=shifted_error, padLen=padLen, peak_half_width=peak_half_width,
-                    upSampleFactor=upSampleFactor, verbose=verbose)
+  if shifted_error is not None:
+    return shifted_flux, shifted_error
+  return shifted_flux
+
+def binData(data, binFactor):
+  n = data.shape[0]
+  nExcess = -1*(n % binFactor)
+  excess = data[nExcess:]
+  data = data[:nExcess]
+
+  data = data.reshape(int(n/binFactor), binFactor, *data.shape[1:])
+  data = np.median(data, 1)
+  excess = np.median(excess,0)
+  try:
+    data = np.vstack((data,excess))
+  except ValueError:
+    data = np.append(data, excess)
+
+  return data
+
 
 def removeLowFrequencyTrends(data, nTrends=1, kernel=51, mode=0, replaceMeans=True):
   '''
@@ -609,6 +627,8 @@ def normalizeData(data, normalizationScheme='divide_row', polyOrder=2):
     data = data / np.median(data,0)
   elif normalizationScheme == 'divide_all':
     data = data / (np.median(data,0) * np.median(data,1)[:,np.newaxis])
+    # rescale to be median 1
+    data = data / np.median(data)
   elif normalizationScheme == 'continuum':
     data = polynomialSubtract(data, polyOrder)
   else:
@@ -1749,7 +1769,8 @@ def plotData(data, xAxis=None, yAxis=None, xlabel='Index', ylabel='Index',
 
   plt.axis('tight')
 
-  plt.title(title)
+  if title is not None:
+    plt.title(title)
   plt.xlabel(xlabel)
   plt.ylabel(ylabel)
 
