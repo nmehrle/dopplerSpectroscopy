@@ -573,9 +573,41 @@ class Collection:
         saveName=saveName+'.png')
 
   #-- Main
+  def preprocessData(self, saveName,
+    alignRefNum=None,
+
+    doInjectSignal=False,
+    injectedKp=None, injectedVsys=None,
+    injectionFudgeFactor=1, injectionRp=None,
+    removeNominalStrength=None,
+
+    verbose=False
+  ):
+    if verbose:
+      seq = tqdm(self.obsList, desc='Pre-processing')
+    else:
+      seq = self.obsList
+
+    for obsData in seq:
+      obs = hrsObs(**obsData)
+      obs.collectRawData()
+      obs.trimData()
+      obs.alignData(alignRefNum=alignRefNum)
+
+      if removeNominalStrength is not None:
+        strength = -1 * np.abs(removeNominalStrength)
+        obs.injectFakeSignal(obs.getNominalKp(), obs.getNominalVsys(), fudgeFactor=strength, Rp=injectionRp)
+
+      if doInjectSignal:
+        obs.injectFakeSignal(injectedKp, injectedVsys,
+          fudgeFactor=injectionFudgeFactor, Rp=injectionRp)
+
+      obs.save(saveName)
+
   def generateAirmassData(self, kpRange,
     cores=1,
 
+    loadDataName=None,
     prepareFunction=None,
     highPassFilter=None,
     secondOrder=True,
@@ -598,6 +630,7 @@ class Collection:
       kpRange=kpRange,
       saveName=saveName,
 
+      loadDataName=loadDataName,
       prepareFunction=prepareFunction,
       highPassFilter=highPassFilter,
       secondOrder=secondOrder,
@@ -637,6 +670,7 @@ class Collection:
   def generateSysremLandscape(self, kpRange,
     cores=1,
 
+    loadDataName=None,
     prepareFunction=None,
     highPassFilter=None,
     refNum=None,
@@ -661,6 +695,7 @@ class Collection:
       obsList=obsList,
       kpRange=kpRange,
 
+      loadDataName=loadDataName,
       prepareFunction=prepareFunction,
       highPassFilter=highPassFilter,
       removeNominalStrength=self.removeNominalStrength,
@@ -1482,6 +1517,7 @@ def getTemplateString(template, asPath=False):
 
 #-- Single Operations
 def airmassAnalysis(obs, kpRange,
+  loadDataName=None,
   prepareFunction=None,
 
   highPassFilter=None,
@@ -1505,6 +1541,7 @@ def airmassAnalysis(obs, kpRange,
 ):
   if prepareFunction is None:
     obs.prepareDataAirmass(
+      loadDataName=loadDataName,
       secondOrder=secondOrder,
       refNum=refNum,
       highPassFilter=highPassFilter,
@@ -1517,6 +1554,7 @@ def airmassAnalysis(obs, kpRange,
     )
   else:
     prepareFunction(obs,
+      loadDataName=loadDataName,
       normalizationScheme=normalizationScheme,
       doInjectSignal=doInjectSignal,
       injectedKp=targetKp,
@@ -1540,6 +1578,7 @@ def airmassAnalysis(obs, kpRange,
 
 def generateSysremIterations(obs, kpRange,
   maxIterations=10,
+  loadDataName=None,
   prepareFunction=None,
   highPassFilter=None,
   hpKernel=65,
@@ -1559,6 +1598,7 @@ def generateSysremIterations(obs, kpRange,
 ):
   if prepareFunction is None:
     obs.prepareDataGeneric(
+      loadDataName=loadDataName,
       refNum=refNum,
       doInjectSignal=doInjectSignal,
       injectedKp=targetKp,
@@ -1579,6 +1619,7 @@ def generateSysremIterations(obs, kpRange,
       raise ValueError('Instrument should be ishell or aries, or figure out best analysis method for new instrument')
   else:
     prepareFunction(obs,
+      loadDataName=loadDataName,
       doInjectSignal=doInjectSignal,
       injectedKp=targetKp,
       injectedVsys=targetVsys,
