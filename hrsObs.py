@@ -759,9 +759,10 @@ class hrsObs:
 
     self.log.append('Trimmed')
 
-  def alignData(self, iterations=1, ref=None, refNum=None,
+  def alignData(self, ref=None, refNum=None,
                 padLen=None, peak_half_width=3,
-                upSampleFactor=1000, verbose=False
+                upSampleFactor=1000, plotOffset=False,
+                verbose=False
   ):
     '''
       Aligns the data to the wavelength solution of the spectrum with the highest SNR. 
@@ -785,17 +786,30 @@ class hrsObs:
         ref = np.mean(self.data[:refNum],0)
 
     data, error = hru.alignment(self.data, ref,
-                        iterations=iterations,
                         error=self.error, padLen=padLen,
                         peak_half_width=peak_half_width,
                         upSampleFactor=upSampleFactor,
+                        plotOffset=plotOffset,
                         verbose=verbose)
 
     self.data = data
     self.unProcessedData=data
     self.error = error
 
-    self.log.append('Aligned')
+    if refNum is None:
+      logMessage = 'Aligned (highest SNR)'
+    else:
+      logMessage = f'Aligned (to first {refNum})'
+    self.log.append(logMessage)
+
+  def binData(self, binFactor):
+    self.data = hru.binData(self.data, binFactor)
+    self.error = hru.binData(self.error, binFactor)
+    self.times = hru.binData(self.times, binFactor)
+    self.barycentricCorrection = hru.binData(self.barycentricCorrection, binFactor)
+    self.airmass = hru.binData(self.airmass, binFactor)
+
+    self.log.append(f'Binned by factor {binFactor}')
 
   def removeLowFrequencyTrends(self, nTrends=1, kernel=65, mode=0, replaceMeans=True):
     '''
@@ -827,7 +841,12 @@ class hrsObs:
         'divide_all': apply both 'divide_col' and 'divide_row'
         'polynomial': subtract a best fit polynomial of order 'polyOrder'
     '''
+    preNorm = copy.deepcopy(self.data)
     data = hru.normalizeData(self.data, normalizationScheme=normalizationScheme, polyOrder=polyOrder)
+
+    if 'divide' in normalizationScheme:
+      scaling = preNorm/data
+      self.error = self.error/scaling
 
     self.data = data
     self.log.append('Normalized: '+normalizationScheme)
@@ -1306,15 +1325,16 @@ class hrsObs:
       if i != len(self.log)-1:
         processStr += ' --> '
 
-    if title != '' and title[-1] != '\n':
-      title += '\n'
+    if title is not None:
+      if title != '' and title[-1] != '\n':
+        title += '\n'
+      title = self.getNameString() + title + processStr
 
-    fullTitle = self.getNameString() + title + processStr
     xlabel = 'Wavelength ('+str(wavelengthUnits)+')'
 
     hru.plotData(self.data, self.wavelengths, ys, xlabel, ylabel,
                  xlim=xlim, ylim=ylim, clim=clim,
-                 figsize=figsize, cmap=cmap, title=fullTitle,
+                 figsize=figsize, cmap=cmap, title=title,
                  saveName=saveName)
 
   def plotXCM(self, yscale='frame', alignmentKp=None, unitPrefix=1000,
@@ -1361,87 +1381,90 @@ class hrsObs:
   ###
 
   #-- Super-level functions
-  def prepareData(self,
-    # TrimData
-    manual=False, plotTrim=False, colTrimFunc=hru.findEdgeCuts_xcor,
-    neighborhood_size=30, gaussian_blur=10,
-    edge=0, rightEdge=None, relative=True,
-    #alignData
-    alignmentIterations=1, alignmentPadLen=None,
-    alignmentPeakHalfWidth=3, alignmentUpSampFactor=1000,
-    #remove Trends:
-    doRemoveLFTrends=False, nTrends=1,
-    lfTrendMode=0,
-    highPassFilter=False, hpKernel=65,
-    #injectData
-    doInjectSignal=False, removeNominal=False,
+  def prepareDataGeneric(self,
+    loadDataName=None,
+    dataName='default.pickle',
+    refNum=None,
+    normalizationScheme='divide_all',
+    doInjectSignal=False,
     injectedKp=None, injectedVsys=None,
-    fudgeFactor=None, Rp=None, unitPrefix=1000,
-    #normalize
-    normalizationScheme='divide_row',polyOrder=2,
-    #generateMask
-    use_time_mask=True, use_wave_mask=False,
-    plotMasks=False, maskRelativeCutoff=3,
-    maskAbsoluteCutoff=0, maskSmoothingFactor=20,
-    maskWindowSize=25, cela=12,
-    # sysrem
-    sysremIterations=None,
-    stopBeforeSysrem=False,
-    # Post Sysrem
-    doVarianceWeight=True,
-    verbose=False
+    injectionFudgeFactor=1, injectionRp=None,
+    removeNominalStrength=None
   ):
-    '''
-      Performs the standard data preperation.
-      Use this before calling obs.generateXCM().
-    '''
+    if loadDataName is None:
+      # Double check we've collected the data for this observation
+      try:
+        self.wavelengths
+      except AttributeError:
+        self.collectRawData()
 
-    self.trimData(manual=manual, plotResult=plotTrim,
-                  colTrimFunc=colTrimFunc,
-                  neighborhood_size=neighborhood_size, gaussian_blur=gaussian_blur,
-                  edge=edge, rightEdge=rightEdge, relative=relative)
+      self.trimData()
+      self.alignData(refNum=refNum)
 
-    self.alignData(iterations=alignmentIterations, padLen=alignmentPadLen,
-                   peak_half_width=alignmentPeakHalfWidth, upSampleFactor=alignmentUpSampFactor,
-                   verbose=verbose)
+      if removeNominalStrength is not None:
+        strength = -1 * np.abs(removeNominalStrength)
+        self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=strength, Rp=injectionRp)
 
-    if doRemoveLFTrends:
-      # After generate Mask?
-      self.removeLowFrequencyTrends(nTrends=nTrends, kernel=hpKernel,
-        mode=lfTrendMode)
+      if doInjectSignal:
+        self.injectFakeSignal(injectedKp, injectedVsys,
+          fudgeFactor=injectionFudgeFactor, Rp=injectionRp)
+    else:
+      self.load(loadDataName)
 
-    if doInjectSignal:
-      # print('---------------------------------')
-      # print('----- Injecting Fake Signal -----')
-      # print('---------------------------------')
-
-      if removeNominal:
-        self.injectFakeSignal(injectedKp=self.getNominalKp(), injectedVsys=self.getNominalVsys(),
-          fudgeFactor= -1, Rp=Rp, unitPrefix=unitPrefix)
-
-      self.injectFakeSignal(injectedKp=injectedKp, injectedVsys=injectedVsys,
-                            fudgeFactor=fudgeFactor, Rp=Rp,
-                            unitPrefix=unitPrefix, verbose=verbose)
-
-    self.generateMask(use_time_mask=use_time_mask, use_wave_mask=use_wave_mask, plotResult=plotMasks,
-                      relativeCutoff=maskRelativeCutoff, absoluteCutoff=maskAbsoluteCutoff,
-                      smoothingFactor=maskSmoothingFactor, windowSize=maskWindowSize)
-
-    self.normalizeData(normalizationScheme=normalizationScheme, polyOrder=polyOrder)
-
+    self.generateMask()
+    self.normalizeData(normalizationScheme)
     self.applyMask()
 
-    if not stopBeforeSysrem:
-      self.sysrem(nCycles=sysremIterations, verbose=verbose)
+    return self
+  
+  def prepareDataAirmass(self,
+    loadDataName=None,
+    secondOrder=True,
+    refNum=None,
+    highPassFilter=False,
+    normalizationScheme='divide_col',
 
-      if doVarianceWeight:
-        self.varianceWeight()
+    doInjectSignal=False,
+    injectedKp=None, injectedVsys=None,
+    injectionFudgeFactor=1, injectionRp=None,
+    removeNominalStrength=None
+  ):
+    if loadDataName is None:
+      # Double check we've collected the data for this observation
+      try:
+        self.wavelengths
+      except AttributeError:
+        self.collectRawData()
 
-      if highPassFilter:
-        print(f'hpfiltering {hpKernel}')
-        self.removeLowFrequencyTrends(mode=1, kernel=hpKernel, replaceMeans=False)
+      self.trimData()
+      self.alignData(refNum=refNum)
 
-      self.applyMask()
+      if removeNominalStrength is not None:
+        strength = -1 * np.abs(removeNominalStrength)
+        self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=strength, Rp=injectionRp)
+
+      if doInjectSignal:
+        self.injectFakeSignal(injectedKp, injectedVsys,
+          fudgeFactor=injectionFudgeFactor, Rp=injectionRp)
+    else:
+      self.load(loadDataName)
+
+    self.generateMask()
+    self.normalizeData(normalizationScheme)
+
+    self.airmassFit()
+
+    if highPassFilter:
+      print('not implemented yet ya dingus')
+
+    if secondOrder:
+      self.secondOrderAirmassFit(doPlot=False)
+
+    self.applyMask()
+    self.varianceWeight()
+    self.applyMask()
+
+    return self
 
   def xcorAnalysis(self, kpRange,
     # Generate XCM
@@ -1466,87 +1489,4 @@ class hrsObs:
 
     if doNormalizeSigMat:
       self.reNormalizeSigMat(rowByRow=rowByRow, byPercentiles=byPercentiles)
-
-  def prepareDataGeneric(self,
-    loadData=False,
-    dataName='default.pickle',
-    refNum=None,
-    normalizationScheme='divide_all',
-    removeNominal=False,
-    doInjectSignal=False,
-    injectedKp=None, injectedVsys=None,
-    injectionFudgeFactor=1, injectionRp=None,
-    removeNominalStrength=None
-  ):
-    # Double check we've collected the data for this observation
-    try:
-      self.wavelengths
-    except AttributeError:
-      self.collectRawData()
-
-    # if loadData:
-      # self.load()
-    self.trimData()
-    self.alignData(refNum=refNum)
-
-    if removeNominal:
-      strength = -1 * np.abs(removeNominalStrength)
-      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=strength, Rp=injectionRp)
-
-    if doInjectSignal:
-      self.injectFakeSignal(injectedKp, injectedVsys,
-        fudgeFactor=injectionFudgeFactor, Rp=injectionRp)
-
-    self.generateMask()
-    self.normalizeData(normalizationScheme)
-    self.applyMask()
-
-    return self
-  
-  def prepareDataAirmass(self,
-    secondOrder=True,
-    refNum=None,
-    highPassFilter=False,
-    normalizationScheme='divide_col',
-
-    removeNominal=False,
-    doInjectSignal=False,
-    injectedKp=None, injectedVsys=None,
-    injectionFudgeFactor=1, injectionRp=None,
-    removeNominalStrength=None
-  ):
-    # Double check we've collected the data for this observation
-    try:
-      self.wavelengths
-    except AttributeError:
-      self.collectRawData()
-
-    self.trimData()
-    self.alignData(refNum=refNum)
-
-    if removeNominalStrength is not None:
-      strength = -1 * np.abs(removeNominalStrength)
-      self.injectFakeSignal(self.getNominalKp(), self.getNominalVsys(), fudgeFactor=strength, Rp=injectionRp)
-
-    if doInjectSignal:
-      self.injectFakeSignal(injectedKp, injectedVsys,
-        fudgeFactor=injectionFudgeFactor, Rp=injectionRp)
-
-    self.generateMask()
-    self.normalizeData(normalizationScheme)
-
-    self.airmassFit()
-
-    if highPassFilter:
-      print('not implemented yet ya dingus')
-
-    if secondOrder:
-      self.secondOrderAirmassFit(doPlot=False)
-
-    self.applyMask()
-    self.varianceWeight()
-    self.applyMask()
-
-    return self
-
   ###
